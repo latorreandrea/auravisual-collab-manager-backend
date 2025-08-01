@@ -1,4 +1,4 @@
-# auravisual-collab-manager
+# Auravisual Collab Manager
 Auravisual Collab Manager is a lightweight, full-stack project management platform built with **FastAPI**, **Supabase**, and **Flutter**. It is designed to help small teams effectively manage projects, tasks, deadlines, and multi-user collaboration.
 
 ### Key Features:
