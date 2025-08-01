@@ -10,4 +10,4 @@ Auravisual Collab Manager is a lightweight, full-stack project management platfo
 
 This project is part of my portfolio and demonstrates my experience with full-stack architecture, backend API design, secure authentication, and modern app development.
 
-**This repository contains only the file to handle the BACKEND {here} you will find the file for the frontend**
+**This repository contains only the file to handle the BACKEND. Here https://github.com/latorreandrea/auravisual-collab-manager-mobile you will find the file for the frontend**
