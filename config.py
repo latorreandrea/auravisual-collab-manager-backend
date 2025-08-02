@@ -53,14 +53,25 @@ class Settings:
     def cors_origins(self):
         """Get CORS origins based on environment"""
         if self.debug:
-            return ["*"]  # Allow all origins in development
+            # Even in dev, be more restrictive
+            return [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "http://localhost:8080",  # Flutter web dev
+                "http://127.0.0.1:8080"
+            ]
         
         # In production, get from environment variable
         allowed_origins = os.getenv("ALLOWED_ORIGINS", "")
         if allowed_origins:
-            return [origin.strip() for origin in allowed_origins.split(",") if origin.strip()]
-        
-        return []
+                origins = [origin.strip() for origin in allowed_origins.split(",") if origin.strip()]
+            # Add your main domain and subdomains
+            origins.extend([
+                "https://www.auravisual.dk",
+                "https://app.auravisual.dk", 
+                "https://client.auravisual.dk"
+            ])
+            return list(set(origins))
 
 settings = Settings()
 
