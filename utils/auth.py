@@ -1,6 +1,6 @@
 from fastapi import HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError, jwt
+import jwt  # PyJWT instead of python-jose
 from datetime import datetime
 from config import settings
 from database import get_user_by_id
@@ -41,7 +41,19 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
         
         return user_id
         
-    except JWTError:
+    except jwt.PyJWTError:  # Changed from JWTError to jwt.PyJWTError
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.ExpiredSignatureError:  # More specific error handling
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError:  # More specific error handling
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
@@ -92,3 +104,23 @@ async def require_admin_or_staff(current_user: Dict = Depends(get_current_user))
         )
     
     return current_user
+
+# Helper function to create JWT tokens (for future use)
+def create_jwt_token(user_id: str, expires_delta: Optional[int] = None) -> str:
+    """
+    Create a JWT token for a user
+    """
+    from datetime import timedelta
+    
+    if expires_delta:
+        expire = datetime.utcnow() + timedelta(minutes=expires_delta)
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
+    
+    payload = {
+        "sub": user_id,
+        "exp": expire,
+        "iat": datetime.utcnow()
+    }
+    
+    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)

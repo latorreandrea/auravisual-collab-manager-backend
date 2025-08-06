@@ -64,13 +64,7 @@ class Settings:
         # In production, get from environment variable
         allowed_origins = os.getenv("ALLOWED_ORIGINS", "")
         if allowed_origins:
-                origins = [origin.strip() for origin in allowed_origins.split(",") if origin.strip()]
-            # Add your main domain and subdomains
-            origins.extend([
-                "https://www.auravisual.dk",
-                "https://app.auravisual.dk", 
-                "https://client.auravisual.dk"
-            ])
+            origins = [origin.strip() for origin in allowed_origins.split(",") if origin.strip()]
             return list(set(origins))
 
 settings = Settings()
