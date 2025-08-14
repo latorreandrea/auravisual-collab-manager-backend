@@ -1,10 +1,17 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings, get_app_config, get_cors_config, get_server_config
-from database import test_connection, get_db, get_all_users, get_users_by_role, Client, get_supabase_client, get_supabase_admin_client, get_user_by_id
 from supabase import create_client
 from utils.auth import get_current_user, require_admin, require_admin_or_staff
 from typing import Dict
+
+from database import (
+    test_connection, get_db, get_all_users, 
+    get_users_by_role, get_users_by_role_with_tasks,  
+    get_user_task_counts, get_tasks_by_user, update_task_status,
+    Client, get_supabase_client, create_task,
+    get_supabase_admin_client, get_user_by_id
+)
 
 # Initialize FastAPI app with centralized configuration
 app = FastAPI(**get_app_config())
@@ -59,12 +66,27 @@ async def list_clients(current_user: Dict = Depends(require_admin_or_staff)):
 
 @app.get("/admin/users/staff")
 async def list_internal_staff(current_user: Dict = Depends(require_admin)):
-    """List all internal staff (admin only)"""
-    staff = await get_users_by_role("internal_staff")
+    """List all internal staff with task statistics (admin only)"""
+    staff = await get_users_by_role_with_tasks("internal_staff")
+    
+    # Format response to include only required fields
+    formatted_staff = []
+    for member in staff:
+        formatted_member = {
+            "id": member.get("id"),
+            "email": member.get("email"),
+            "username": member.get("username"),
+            "full_name": member.get("full_name"),
+            "task_counts": member.get("task_counts", {
+                "total_assigned": 0,
+                "active_tasks": 0
+            })
+        }
+        formatted_staff.append(formatted_member)
+    
     return {
-        "total_staff": len(staff),
-        "staff": staff,
-        "requested_by": current_user.get("username")
+        "total_staff": len(formatted_staff),
+        "staff": formatted_staff
     }
 
 @app.post("/auth/register")
@@ -132,7 +154,191 @@ async def register(user_data: dict, current_user: Dict = Depends(require_admin))
         )
 
 # User profile endpoints
+@app.get("/tasks/my")
+async def get_my_tasks(
+    status: str = None,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Get tasks assigned to current user with optional status filter"""
+    user_id = current_user.get("id")
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    # Validate status filter if provided
+    if status and status not in ["in_progress", "completed"]:
+        raise HTTPException(status_code=400, detail="Invalid status. Must be 'in_progress' or 'completed'")
+    
+    tasks = await get_tasks_by_user(user_id, status)
+    
+    return {
+        "user_id": user_id,
+        "status_filter": status or "all",
+        "total_tasks": len(tasks),
+        "tasks": tasks
+    }
 
+@app.get("/tasks/my/active")
+async def get_my_active_tasks(current_user: Dict = Depends(get_current_user)):
+    """Get only active (in_progress) tasks for current user"""
+    user_id = current_user.get("id")
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    tasks = await get_tasks_by_user(user_id, "in_progress")
+    
+    return {
+        "user_id": user_id,
+        "active_tasks": len(tasks),
+        "tasks": tasks
+    }
+
+@app.patch("/tasks/{task_id}/status")
+async def update_task_status_endpoint(
+    task_id: str,
+    status_data: dict,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Update task status (only by assigned user or admin)"""
+    new_status = status_data.get("status")
+    
+    if not new_status:
+        raise HTTPException(status_code=400, detail="Status is required")
+    
+    if new_status not in ["in_progress", "completed"]:
+        raise HTTPException(status_code=400, detail="Invalid status. Must be 'in_progress' or 'completed'")
+    
+    user_id = current_user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    
+    result = await update_task_status(task_id, new_status, user_id)
+    
+    if "error" in result:
+        if result["error"] == "Permission denied":
+            raise HTTPException(status_code=403, detail=result["error"])
+        elif result["error"] == "Task not found":
+            raise HTTPException(status_code=404, detail=result["error"])
+        else:
+            raise HTTPException(status_code=400, detail=result["error"])
+    
+    return {
+        "message": "Task status updated successfully",
+        "task_id": task_id,
+        "new_status": new_status,
+        "updated_by": current_user.get("username")
+    }
+
+
+# Admin endpoint to get all tasks
+@app.get("/admin/tasks")
+async def get_all_tasks(
+    status: str = None,
+    assigned_to: str = None,
+    current_user: Dict = Depends(require_admin)
+):
+    """Get all tasks with optional filters (admin only)"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        query = admin_client.from_("tasks").select("""
+            id,
+            ticket_id,
+            assigned_to,
+            action,
+            priority,
+            status,
+            created_at,
+            updated_at,
+            users:assigned_to (
+                full_name,
+                email,
+                username
+            ),
+            tickets:ticket_id (
+                id,
+                message,
+                status,
+                projects:project_id (
+                    id,
+                    name
+                )
+            )
+        """)
+        
+        if status:
+            query = query.eq("status", status)
+        
+        if assigned_to:
+            query = query.eq("assigned_to", assigned_to)
+        
+        response = query.order("created_at", desc=True).execute()
+        tasks = response.data if response.data else []
+        
+        return {
+            "total_tasks": len(tasks),
+            "filters": {
+                "status": status,
+                "assigned_to": assigned_to
+            },
+            "tasks": tasks,
+            "requested_by": current_user.get("username")
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching tasks: {str(e)}")
+
+@app.post("/admin/tasks")
+async def create_task_endpoint(
+    task_data: dict,
+    current_user: Dict = Depends(require_admin)
+):
+    """Create a new task (admin only)"""
+    try:
+        # Extract data from request
+        ticket_id = task_data.get("ticket_id")
+        assigned_to = task_data.get("assigned_to") 
+        action = task_data.get("action")
+        priority = task_data.get("priority", "medium")
+        
+        # Validate required fields
+        if not all([ticket_id, assigned_to, action]):
+            raise HTTPException(
+                status_code=400,
+                detail="ticket_id, assigned_to, and action are required"
+            )
+        
+        # Validate priority
+        valid_priorities = ["low", "medium", "high", "urgent"]
+        if priority not in valid_priorities:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid priority. Must be one of: {valid_priorities}"
+            )
+        
+        # Create task
+        result = await create_task(ticket_id, assigned_to, action, priority)
+        
+        if "error" in result:
+            raise HTTPException(
+                status_code=400,
+                detail=result["error"]
+            )
+        
+        return {
+            "message": "Task created successfully",
+            "task": result,
+            "created_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating task: {str(e)}"
+        )
 # User authentication endpoints
 
 @app.post("/auth/login")
@@ -238,6 +444,8 @@ if settings.debug:
                 "error": str(e),
                 "accessed_by": current_user.get("username")
             }
+
+
 
 if __name__ == "__main__":
     import uvicorn
