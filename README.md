@@ -661,3 +661,204 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] API rate limiting
 - [ ] Comprehensive test suite
 - [ ] CI/CD pipeline
+
+---
+
+## 🧩 Projects, Tickets & Tasks - Additional API Details
+
+This section documents the project/ticket/task endpoints that support the core collaboration flow. All endpoints below require a valid Bearer token (Supabase session token). Admin-only endpoints require the caller to have the `admin` role.
+
+### Ticket statuses
+- `to_read` - New ticket, not yet reviewed by staff/admin
+- `processing` - Ticket currently being processed (tasks have been created)
+- `accepted` - Ticket request accepted / approved
+- `rejected` - Ticket request rejected
+
+### Task statuses
+- `in_progress` - Task is active and work is ongoing
+- `completed` - Task has been finished
+
+> Note: Active tasks are those with `status = in_progress`.
+
+---
+
+### GET /admin/projects
+Description: Admin endpoint that returns all projects with their client information and only the open tickets and active tasks for each project.
+Authentication: Bearer token (admin)
+
+Response shape (trimmed):
+
+```json
+{
+  "total_projects": 3,
+  "projects": [
+    {
+      "id": "uuid-project-1",
+      "name": "Website Redesign",
+      "status": "in_development",
+      "plan": "Aura Boost",
+      "client": { "id": "uuid-client-1", "email": "client@example.com", "username": "client1" },
+      "open_tickets_count": 2,
+      "open_tasks_count": 5,
+      "open_tickets": [
+        {
+          "id": "uuid-ticket-1",
+          "message": "Change header color",
+          "status": "to_read",
+          "active_tasks_count": 2,
+          "active_tasks": [ { "id": "uuid-task-1", "action": "Change CSS header color", "assigned_to": "uuid-staff-1", "status": "in_progress" } ]
+        }
+      ],
+      "created_at": "2025-01-01T10:00:00Z"
+    }
+  ]
+}
+```
+
+Example curl:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://app.auravisual.dk/admin/projects
+```
+
+---
+
+### GET /admin/projects/{project_id}
+Description: Admin endpoint that returns a single project with client info, open tickets and their active tasks.
+Authentication: Bearer token (admin)
+
+Response shape: same as a single project object from the list above.
+
+Example curl:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://app.auravisual.dk/admin/projects/PROJECT_UUID
+```
+
+---
+
+### POST /admin/tasks
+Description: Admin creates a single task.
+Authentication: Bearer token (admin)
+
+Request body:
+
+```json
+{
+  "ticket_id": "uuid-ticket-1",
+  "assigned_to": "uuid-staff-1",
+  "action": "Implement responsive nav",
+  "priority": "high"   // optional: one of low, medium, high, urgent
+}
+```
+
+Response: created task object (includes `status` defaulting to `in_progress`).
+
+Example curl:
+
+```bash
+curl -X POST https://app.auravisual.dk/admin/tasks \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"ticket_id":"TICKET_UUID","assigned_to":"STAFF_UUID","action":"Fix layout","priority":"high"}'
+```
+
+---
+
+### POST /admin/tickets/{ticket_id}/tasks (bulk create)
+Description: Admin creates multiple tasks for a ticket in a single request. Each task must include `action` and `assigned_to`. `priority` is optional. After tasks are created the ticket's status is updated to `processing`.
+Authentication: Bearer token (admin)
+
+Request body:
+
+```json
+{
+  "tasks": [
+    {"action":"Change header color to brand green","assigned_to":"uuid-staff-1","priority":"high"},
+    {"action":"Compress hero images","assigned_to":"uuid-staff-2"}
+  ]
+}
+```
+
+Response (trimmed):
+
+```json
+{
+  "message": "Tasks created and ticket moved to 'processing'",
+  "created_tasks_count": 2,
+  "created_tasks": [ {"id": "uuid-task-1", "action": "..."}, {"id": "uuid-task-2"} ],
+  "ticket_id": "uuid-ticket-1",
+  "ticket_status": "processing"
+}
+```
+
+Example curl:
+
+```bash
+curl -X POST https://app.auravisual.dk/admin/tickets/TICKET_UUID/tasks \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tasks":[{"action":"Fix bug","assigned_to":"STAFF_UUID"}]}'
+```
+
+---
+
+### GET /tasks/my
+Description: Get tasks assigned to the current authenticated user. Optional query param `status` filters by `in_progress` or `completed`.
+Authentication: Bearer token (any authenticated user)
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer $USER_TOKEN" \
+  "https://app.auravisual.dk/tasks/my?status=in_progress"
+```
+
+### GET /tasks/my/active
+Description: Convenience endpoint that returns only active tasks (`status = in_progress`) for the current user.
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer $USER_TOKEN" \
+  https://app.auravisual.dk/tasks/my/active
+```
+
+### PATCH /tasks/{task_id}/status
+Description: Update the status of a task. Only the assigned user or an admin may update a task's status. Allowed values: `in_progress`, `completed`.
+Authentication: Bearer token (assigned user or admin)
+
+Request body:
+
+```json
+{"status":"completed"}
+```
+
+Example curl:
+
+```bash
+curl -X PATCH https://app.auravisual.dk/tasks/TASK_UUID/status \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"completed"}'
+```
+
+---
+
+## ✅ Summary of permissions (quick reference)
+
+| Resource | Admin | Internal Staff | Client |
+|---|---:|:---:|:---:|
+| Create project | ✅ | ❌ | ❌ |
+| Read projects | ✅ | ✅ | ✅ (own only) |
+| Create ticket | ❌ | ❌ | ✅ (own projects) |
+| Read ticket (own) | ✅ | ✅ | ✅ |
+| Create tasks | ✅ | ❌ | ❌ |
+| Read assigned tasks | ✅ | ✅ | ✅ (own only) |
+| Update task status | ✅ | ✅ (if assigned) | ❌ |
+
+---
+
+If you want, I can also export a Postman collection that covers the admin project/ticket/task flow. 
