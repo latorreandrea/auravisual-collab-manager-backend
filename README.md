@@ -861,4 +861,3 @@ curl -X PATCH https://app.auravisual.dk/tasks/TASK_UUID/status \
 
 ---
 
-If you want, I can also export a Postman collection that covers the admin project/ticket/task flow. 
