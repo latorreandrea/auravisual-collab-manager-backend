@@ -1,5 +1,7 @@
 # Auravisual Collab Manager - Backend API
 
+![Version](https://img.shields.io/badge/version-1.2.0-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green) ![Python](https://img.shields.io/badge/python-3.11+-blue)
+
 Auravisual Collab Manager is a lightweight, full-stack project management platform built with **FastAPI**, **Supabase**, and **Flutter**. It is designed to help small teams effectively manage projects, tasks, deadlines, and multi-user collaboration.
 
 ## 🚀 Key Features
@@ -8,6 +10,9 @@ Auravisual Collab Manager is a lightweight, full-stack project management platfo
 - 👥 **Role-based Access Control** (Admin, Internal Staff, Client)
 - 🛡️ **Row Level Security** (RLS) for data protection
 - 📊 **RESTful API** with comprehensive endpoints
+- 🏗️ **Project Management** with full CRUD operations
+- 📋 **Task Management** with status tracking and assignment
+- 🎫 **Ticket System** for client communication
 - 🐳 **Docker-ready** for easy deployment
 - 🌐 **CORS Configuration** for cross-origin requests
 - 📱 **Cross-platform** frontend support (Flutter)
@@ -739,6 +744,50 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ---
 
+### POST /admin/projects
+Description: Admin endpoint to create a new project. Requires project name and client_id. Website and socials fields are optional.
+Authentication: Bearer token (admin)
+
+Request body:
+
+```json
+{
+  "name": "New Website Project",
+  "client_id": "uuid-client-1",
+  "website": "https://example.com",    // optional
+  "socials": "instagram: @example"     // optional
+}
+```
+
+Response:
+
+```json
+{
+  "message": "Project created successfully",
+  "project": {
+    "id": "uuid-project-new",
+    "name": "New Website Project",
+    "client_id": "uuid-client-1",
+    "website": "https://example.com",
+    "socials": "instagram: @example",
+    "status": "active",
+    "created_at": "2025-08-16T10:00:00Z"
+  },
+  "created_by": "admin_username"
+}
+```
+
+Example curl:
+
+```bash
+curl -X POST https://app.auravisual.dk/admin/projects \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"My New Project","client_id":"CLIENT_UUID","website":"https://example.com"}'
+```
+
+---
+
 ### POST /admin/tasks
 Description: Admin creates a single task.
 Authentication: Bearer token (admin)
@@ -858,6 +907,23 @@ curl -X PATCH https://app.auravisual.dk/tasks/TASK_UUID/status \
 | Create tasks | ✅ | ❌ | ❌ |
 | Read assigned tasks | ✅ | ✅ | ✅ (own only) |
 | Update task status | ✅ | ✅ (if assigned) | ❌ |
+
+---
+
+## 🔄 Recent Updates
+
+### Version 1.2.0 (August 2025)
+- ✅ **NEW: Project Creation Endpoint** - Admin users can now create new projects via `POST /admin/projects`
+- ✅ **Enhanced Project Management** - Added comprehensive project creation with validation
+- ✅ **Optional Fields Support** - Website and social media fields are now optional in project creation
+- ✅ **Improved Error Handling** - Better error messages for project creation validation
+- ✅ **Updated Documentation** - Complete API documentation with examples for all endpoints
+
+### Features Added:
+- `POST /admin/projects` - Create new projects with required name and client_id
+- Client validation - Ensures the specified client_id exists and has "client" role
+- Flexible project data - Website and socials fields are optional
+- Consistent response format - Follows established API response patterns
 
 ---
 

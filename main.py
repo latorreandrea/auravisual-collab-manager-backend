@@ -12,7 +12,7 @@ from database import (
     Client, get_supabase_client, create_task,
     get_supabase_admin_client, get_user_by_id,
     get_all_projects_with_relations, get_project_with_relations,
-    create_tasks_bulk
+    create_tasks_bulk, create_project
 )
 
 # Initialize FastAPI app with centralized configuration
@@ -485,6 +485,55 @@ async def admin_create_tasks_for_ticket(
         "ticket_status": result.get("ticket_status"),
         "created_by": current_user.get("username")
     }
+
+@app.post("/admin/projects")
+async def create_project_endpoint(
+    project_data: dict,
+    current_user: Dict = Depends(require_admin)
+):
+    """Create a new project (admin only)"""
+    try:
+        # Extract data from request
+        name = project_data.get("name")
+        client_id = project_data.get("client_id")
+        website = project_data.get("website")  # Optional
+        socials = project_data.get("socials")  # Optional
+        
+        # Validate required fields
+        if not name or not client_id:
+            raise HTTPException(
+                status_code=400,
+                detail="name and client_id are required"
+            )
+        
+        # Create project using database function
+        result = create_project(
+            name=name,
+            client_id=client_id,
+            website=website,
+            socials=socials
+        )
+        
+        # Check for errors
+        if "error" in result:
+            if "not found" in result["error"]:
+                raise HTTPException(status_code=404, detail=result["error"])
+            elif "not a client" in result["error"]:
+                raise HTTPException(status_code=400, detail=result["error"])
+            else:
+                raise HTTPException(status_code=500, detail=result["error"])
+        
+        return {
+            "message": "Project created successfully",
+            "project": result.get("project"),
+            "created_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating project: {str(e)}")
+
 # User authentication endpoints
 
 @app.post("/auth/login")

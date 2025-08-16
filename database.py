@@ -394,6 +394,57 @@ async def create_tasks_bulk(ticket_id: str, tasks: List[Dict]) -> Dict:
         logger.error(f"Error creating tasks bulk for ticket {ticket_id}: {str(e)}")
         return {"error": str(e)}
 
+def create_project(name: str, client_id: str, website: str = None, socials: str = None):
+    """
+    Create a new project in the database
+    
+    Args:
+        name: Project name (required)
+        client_id: ID of the client who owns the project (required)
+        website: Project website URL (optional)
+        socials: Project social media info (optional)
+    
+    Returns:
+        dict: Created project data or error message
+    """
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Verify client exists
+        client_check = admin_client.from_("users").select("id, role").eq("id", client_id).single().execute()
+        if not client_check.data:
+            return {"error": "Client not found"}
+        
+        # Verify the user is actually a client
+        if client_check.data.get("role") != "client":
+            return {"error": "Specified user is not a client"}
+        
+        # Prepare project data
+        project_data = {
+            "name": name,
+            "client_id": client_id,
+            "status": "active"
+        }
+        
+        # Add optional fields if provided
+        if website:
+            project_data["website"] = website
+        if socials:
+            project_data["socials"] = socials
+            
+        # Insert the project
+        response = admin_client.from_("projects").insert(project_data).execute()
+        
+        if response.data:
+            logger.info(f"Project created successfully: {response.data[0].get('id')}")
+            return {"project": response.data[0]}
+        else:
+            return {"error": "Failed to create project"}
+            
+    except Exception as e:
+        logger.error(f"Error creating project: {str(e)}")
+        return {"error": str(e)}
+
 # Database dependencies for FastAPI
 def get_db() -> Client:
     """Dependency to inject database client into FastAPI endpoints"""
