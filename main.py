@@ -172,12 +172,12 @@ async def admin_list_projects(current_user: Dict = Depends(require_admin)):
     for p in projects:
         client = p.get("clients") or {}
         tickets = p.get("tickets") or []
+        
         # Filter open tickets
         open_tickets = []
         open_tasks_count = 0
         for t in tickets:
             if t.get("status") in OPEN_TICKET_STATUSES:
-                # filter ticket tasks to active only
                 tasks = t.get("tasks") or []
                 active_tasks = [task for task in tasks if task.get("status") == ACTIVE_TASK_STATUS]
                 t_copy = {
@@ -191,17 +191,21 @@ async def admin_list_projects(current_user: Dict = Depends(require_admin)):
                 }
                 open_tasks_count += len(active_tasks)
                 open_tickets.append(t_copy)
+        
         formatted.append({
             "id": p.get("id"),
-            "name": p.get("name"),
-            "description": p.get("description"),
+            "name": p.get("name") or "Unnamed Project",  # ← Default se vuoto
+            "description": p.get("description") or "",    # ← Stringa vuota invece di null
             "status": p.get("status"),
             "plan": p.get("plan"),
+            "website": p.get("website") or "",            # ← Stringa vuota invece di null
+            "socials": p.get("socials") or [],            # ← Array vuoto invece di null
+            "contract_subscription_date": p.get("contract_subscription_date"),  # ← Mantieni null per date
             "client": {
                 "id": client.get("id"),
-                "email": client.get("email"),
-                "username": client.get("username"),
-                "full_name": client.get("full_name")
+                "email": client.get("email") or "unknown@example.com",
+                "username": client.get("username") or "unknown",
+                "full_name": client.get("full_name") or "Unknown Client"
             },
             "open_tickets_count": len(open_tickets),
             "open_tasks_count": open_tasks_count,
@@ -209,6 +213,7 @@ async def admin_list_projects(current_user: Dict = Depends(require_admin)):
             "created_at": p.get("created_at"),
             "updated_at": p.get("updated_at")
         })
+    
     return {
         "total_projects": len(formatted),
         "projects": formatted,

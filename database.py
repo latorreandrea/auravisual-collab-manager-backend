@@ -246,7 +246,6 @@ async def get_all_projects_with_relations() -> List[Dict]:
     """Return all projects with related client, tickets and tasks (admin client)."""
     try:
         admin_client = get_supabase_admin_client()
-        # Nested select: clients from client_id, tickets by project_id, tasks by ticket_id
         response = admin_client.from_("projects").select("""
             id,
             name,
@@ -278,7 +277,27 @@ async def get_all_projects_with_relations() -> List[Dict]:
                 )
             )
         """).order("created_at", desc=True).execute()
-        return response.data if response.data else []
+        
+        # Process and clean data
+        projects = response.data if response.data else []
+        for project in projects:
+            # Ensure client exists or provide default
+            if not project.get("clients"):
+                project["clients"] = {
+                    "id": None,
+                    "email": "Unknown Client",
+                    "username": "unknown",
+                    "full_name": "Unknown Client"
+                }
+            
+            # Clean empty arrays/objects
+            if not project.get("socials"):
+                project["socials"] = []
+            
+            if not project.get("tickets"):
+                project["tickets"] = []
+        
+        return projects
     except Exception as e:
         logger.error(f"Error fetching projects with relations: {str(e)}")
         return []
