@@ -241,6 +241,140 @@ async def create_task(ticket_id: str, assigned_to: str, action: str, priority: s
         logger.error(f"Error creating task: {str(e)}")
         return {"error": str(e)}
 
+
+async def get_all_projects_with_relations() -> List[Dict]:
+    """Return all projects with related client, tickets and tasks (admin client)."""
+    try:
+        admin_client = get_supabase_admin_client()
+        # Nested select: clients from client_id, tickets by project_id, tasks by ticket_id
+        response = admin_client.from_("projects").select("""
+            id,
+            name,
+            description,
+            client_id,
+            website,
+            socials,
+            plan,
+            contract_subscription_date,
+            status,
+            created_at,
+            updated_at,
+            clients:client_id ( id, email, username, full_name ),
+            tickets:project_id (
+                id,
+                message,
+                status,
+                task_ids,
+                created_at,
+                updated_at,
+                tasks:ticket_id (
+                    id,
+                    action,
+                    assigned_to,
+                    status,
+                    priority,
+                    created_at,
+                    updated_at
+                )
+            )
+        """).order("created_at", desc=True).execute()
+        return response.data if response.data else []
+    except Exception as e:
+        logger.error(f"Error fetching projects with relations: {str(e)}")
+        return []
+
+async def get_project_with_relations(project_id: str) -> Optional[Dict]:
+    """Return single project with related client, tickets and tasks (admin client)."""
+    try:
+        admin_client = get_supabase_admin_client()
+        response = admin_client.from_("projects").select("""
+            id,
+            name,
+            description,
+            client_id,
+            website,
+            socials,
+            plan,
+            contract_subscription_date,
+            status,
+            created_at,
+            updated_at,
+            clients:client_id ( id, email, username, full_name ),
+            tickets:project_id (
+                id,
+                message,
+                status,
+                task_ids,
+                created_at,
+                updated_at,
+                tasks:ticket_id (
+                    id,
+                    action,
+                    assigned_to,
+                    status,
+                    priority,
+                    created_at,
+                    updated_at
+                )
+            )
+        """).eq("id", project_id).single().execute()
+        return response.data if response.data else None
+    except Exception as e:
+        logger.error(f"Error fetching project {project_id}: {str(e)}")
+        return None
+
+
+async def create_tasks_bulk(ticket_id: str, tasks: List[Dict]) -> Dict:
+    """Create multiple tasks for a ticket (admin only). Also set ticket status to 'processing'"""
+    try:
+        admin_client = get_supabase_admin_client()
+        # Verify ticket exists
+        ticket_check = admin_client.from_("tickets").select("id, client_id").eq("id", ticket_id).single().execute()
+        if not ticket_check.data:
+            return {"error": "Ticket not found"}
+
+        # Validate users and prepare insert payload
+        insert_payload = []
+        valid_priorities = {"low", "medium", "high", "urgent"}
+        for t in tasks:
+            task = t.get("task") or t.get("task") or t.get("task_action")
+            assigned_to = t.get("assigned_to")
+            priority = t.get("priority", "medium")
+
+            if not task or not assigned_to:
+                return {"error": "Each task must include 'task' and 'assigned_to'"}
+            if priority not in valid_priorities:
+                return {"error": f"Invalid priority '{priority}'. Allowed: {list(valid_priorities)}"}
+
+            # Validate assigned user exists
+            user_check = admin_client.from_("users").select("id").eq("id", assigned_to).single().execute()
+            if not user_check.data:
+                return {"error": f"Assigned user not found: {assigned_to}"}
+
+            insert_payload.append({
+                "ticket_id": ticket_id,
+                "assigned_to": assigned_to,
+                "task": task,
+                "priority": priority,
+                "status": "in_progress"
+            })
+
+        if not insert_payload:
+            return {"error": "No valid tasks to create"}
+
+        # Insert tasks in bulk
+        response = admin_client.from_("tasks").insert(insert_payload).execute()
+        created = response.data if response.data else []
+
+        # Update ticket status to processing
+        admin_client.from_("tickets").update({"status": "processing"}).eq("id", ticket_id).execute()
+
+        return {"tasks": created, "ticket_id": ticket_id, "ticket_status": "processing"}
+
+    except Exception as e:
+        logger.error(f"Error creating tasks bulk for ticket {ticket_id}: {str(e)}")
+        return {"error": str(e)}
+
 # Database dependencies for FastAPI
 def get_db() -> Client:
     """Dependency to inject database client into FastAPI endpoints"""

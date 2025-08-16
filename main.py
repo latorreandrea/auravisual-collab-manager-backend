@@ -10,7 +10,9 @@ from database import (
     get_users_by_role, get_users_by_role_with_tasks,  
     get_user_task_counts, get_tasks_by_user, update_task_status,
     Client, get_supabase_client, create_task,
-    get_supabase_admin_client, get_user_by_id
+    get_supabase_admin_client, get_user_by_id,
+    get_all_projects_with_relations, get_project_with_relations,
+    create_tasks_bulk
 )
 
 # Initialize FastAPI app with centralized configuration
@@ -18,6 +20,13 @@ app = FastAPI(**get_app_config())
 
 # Add CORS middleware
 app.add_middleware(CORSMiddleware, **get_cors_config())
+
+
+# MAIN VARIABLES SETTINGS:
+
+OPEN_TICKET_STATUSES = {"to_read", "processing"}
+ACTIVE_TASK_STATUS = "in_progress"
+
 
 @app.get("/")
 async def root():
@@ -153,7 +162,109 @@ async def register(user_data: dict, current_user: Dict = Depends(require_admin))
             detail=f"Registration failed: {str(e)}"
         )
 
-# User profile endpoints
+
+# PROJECTS API:
+@app.get("/admin/projects")
+async def admin_list_projects(current_user: Dict = Depends(require_admin)):
+    """List all projects with client and only open tickets + active tasks (admin only)."""
+    projects = await get_all_projects_with_relations()
+    formatted = []
+    for p in projects:
+        client = p.get("clients") or {}
+        tickets = p.get("tickets") or []
+        # Filter open tickets
+        open_tickets = []
+        open_tasks_count = 0
+        for t in tickets:
+            if t.get("status") in OPEN_TICKET_STATUSES:
+                # filter ticket tasks to active only
+                tasks = t.get("tasks") or []
+                active_tasks = [task for task in tasks if task.get("status") == ACTIVE_TASK_STATUS]
+                t_copy = {
+                    "id": t.get("id"),
+                    "message": t.get("message"),
+                    "status": t.get("status"),
+                    "created_at": t.get("created_at"),
+                    "updated_at": t.get("updated_at"),
+                    "active_tasks": active_tasks,
+                    "active_tasks_count": len(active_tasks)
+                }
+                open_tasks_count += len(active_tasks)
+                open_tickets.append(t_copy)
+        formatted.append({
+            "id": p.get("id"),
+            "name": p.get("name"),
+            "description": p.get("description"),
+            "status": p.get("status"),
+            "plan": p.get("plan"),
+            "client": {
+                "id": client.get("id"),
+                "email": client.get("email"),
+                "username": client.get("username"),
+                "full_name": client.get("full_name")
+            },
+            "open_tickets_count": len(open_tickets),
+            "open_tasks_count": open_tasks_count,
+            "open_tickets": open_tickets,
+            "created_at": p.get("created_at"),
+            "updated_at": p.get("updated_at")
+        })
+    return {
+        "total_projects": len(formatted),
+        "projects": formatted,
+        "requested_by": current_user.get("username")
+    }
+
+@app.get("/admin/projects/{project_id}")
+async def admin_get_project(project_id: str, current_user: Dict = Depends(require_admin)):
+    """Get single project with client and only open tickets + active tasks (admin only)."""
+    p = await get_project_with_relations(project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+    client = p.get("clients") or {}
+    tickets = p.get("tickets") or []
+    open_tickets = []
+    open_tasks_count = 0
+    for t in tickets:
+        if t.get("status") in OPEN_TICKET_STATUSES:
+            tasks = t.get("tasks") or []
+            active_tasks = [task for task in tasks if task.get("status") == ACTIVE_TASK_STATUS]
+            t_copy = {
+                "id": t.get("id"),
+                "message": t.get("message"),
+                "status": t.get("status"),
+                "created_at": t.get("created_at"),
+                "updated_at": t.get("updated_at"),
+                "active_tasks": active_tasks,
+                "active_tasks_count": len(active_tasks)
+            }
+            open_tasks_count += len(active_tasks)
+            open_tickets.append(t_copy)
+    result = {
+        "id": p.get("id"),
+        "name": p.get("name"),
+        "description": p.get("description"),
+        "status": p.get("status"),
+        "plan": p.get("plan"),
+        "client": {
+            "id": client.get("id"),
+            "email": client.get("email"),
+            "username": client.get("username"),
+            "full_name": client.get("full_name")
+        },
+        "open_tickets_count": len(open_tickets),
+        "open_tasks_count": open_tasks_count,
+        "open_tickets": open_tickets,
+        "created_at": p.get("created_at"),
+        "updated_at": p.get("updated_at"),
+        "requested_by": current_user.get("username")
+    }
+    return result
+
+# PROFILE API
+
+
+# TASK API
 @app.get("/tasks/my")
 async def get_my_tasks(
     status: str = None,
@@ -231,7 +342,7 @@ async def update_task_status_endpoint(
     }
 
 
-# Admin endpoint to get all tasks
+# TASK ADMIN API
 @app.get("/admin/tasks")
 async def get_all_tasks(
     status: str = None,
@@ -339,6 +450,36 @@ async def create_task_endpoint(
             status_code=500,
             detail=f"Error creating task: {str(e)}"
         )
+
+
+@app.post("/admin/tickets/{ticket_id}/tasks")
+async def admin_create_tasks_for_ticket(
+    ticket_id: str,
+    payload: dict,
+    current_user: Dict = Depends(require_admin)
+):
+    """
+    Create multiple tasks for a ticket (admin only).
+    Request body: {"tasks": [{"action": "...", "assigned_to": "...", "priority": "medium"}, ...]}
+    Ticket will be moved to 'processing'.
+    """
+    tasks = payload.get("tasks")
+    if not tasks or not isinstance(tasks, list):
+        raise HTTPException(status_code=400, detail="Request body must include 'tasks' array")
+
+    # Minimal validation occurs in DB helper; call it
+    result = await create_tasks_bulk(ticket_id, tasks)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return {
+        "message": "Tasks created and ticket moved to 'processing'",
+        "created_tasks_count": len(result.get("tasks", [])),
+        "created_tasks": result.get("tasks", []),
+        "ticket_id": ticket_id,
+        "ticket_status": result.get("ticket_status"),
+        "created_by": current_user.get("username")
+    }
 # User authentication endpoints
 
 @app.post("/auth/login")
