@@ -170,7 +170,7 @@ async def admin_list_projects(current_user: Dict = Depends(require_admin)):
     projects = await get_all_projects_with_relations()
     formatted = []
     for p in projects:
-        client = p.get("clients") or {}
+        client = p.get("client") or {}
         tickets = p.get("tickets") or []
         
         # Filter open tickets
@@ -226,7 +226,7 @@ async def admin_get_project(project_id: str, current_user: Dict = Depends(requir
     p = await get_project_with_relations(project_id)
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
-    client = p.get("clients") or {}
+    client = p.get("client") or {}
     tickets = p.get("tickets") or []
     open_tickets = []
     open_tasks_count = 0

@@ -348,56 +348,40 @@ async def get_all_projects_with_relations() -> List[Dict]:
     """Return all projects with related client, tickets and tasks (admin client)."""
     try:
         admin_client = get_supabase_admin_client()
-        response = admin_client.from_("projects").select("""
-            id,
-            name,
-            description,
-            client_id,
-            website_url,
-            social_links,
-            plan,
-            contract_subscription_date,
-            status,
-            created_at,
-            updated_at,
-            clients:client_id ( id, email, username, full_name ),
-            tickets:project_id (
-                id,
-                message,
-                status,
-                task_ids,
-                created_at,
-                updated_at,
-                tasks:ticket_id (
-                    id,
-                    action,
-                    assigned_to,
-                    status,
-                    priority,
-                    created_at,
-                    updated_at
-                )
-            )
-        """).order("created_at", desc=True).execute()
         
-        # Process and clean data
-        projects = response.data if response.data else []
+        # Get projects
+        projects_response = admin_client.from_("projects").select("*").order("created_at", desc=True).execute()
+        projects = projects_response.data if projects_response.data else []
+        
+        # For each project, get client and tickets separately
         for project in projects:
-            # Ensure client exists or provide default
-            if not project.get("clients"):
-                project["clients"] = {
+            # Get client info
+            if project.get("client_id"):
+                client_response = admin_client.from_("users").select("id, email, username, full_name").eq("id", project["client_id"]).single().execute()
+                project["client"] = client_response.data if client_response.data else {
+                    "id": None,
+                    "email": "Unknown Client",
+                    "username": "unknown", 
+                    "full_name": "Unknown Client"
+                }
+            else:
+                project["client"] = {
                     "id": None,
                     "email": "Unknown Client",
                     "username": "unknown",
                     "full_name": "Unknown Client"
                 }
             
-            # Clean empty arrays/objects
-            if not project.get("social_links"):
-                project["social_links"] = []
+            # Get tickets for this project
+            tickets_response = admin_client.from_("tickets").select("*").eq("project_id", project["id"]).execute()
+            tickets = tickets_response.data if tickets_response.data else []
             
-            if not project.get("tickets"):
-                project["tickets"] = []
+            # For each ticket, get tasks
+            for ticket in tickets:
+                tasks_response = admin_client.from_("tasks").select("*").eq("ticket_id", ticket["id"]).execute()
+                ticket["tasks"] = tasks_response.data if tasks_response.data else []
+            
+            project["tickets"] = tickets
         
         return projects
     except Exception as e:
@@ -408,38 +392,43 @@ async def get_project_with_relations(project_id: str) -> Optional[Dict]:
     """Return single project with related client, tickets and tasks (admin client)."""
     try:
         admin_client = get_supabase_admin_client()
-        response = admin_client.from_("projects").select("""
-            id,
-            name,
-            description,
-            client_id,
-            website_url,
-            social_links,
-            plan,
-            contract_subscription_date,
-            status,
-            created_at,
-            updated_at,
-            clients:client_id ( id, email, username, full_name ),
-            tickets:project_id (
-                id,
-                message,
-                status,
-                task_ids,
-                created_at,
-                updated_at,
-                tasks:ticket_id (
-                    id,
-                    action,
-                    assigned_to,
-                    status,
-                    priority,
-                    created_at,
-                    updated_at
-                )
-            )
-        """).eq("id", project_id).single().execute()
-        return response.data if response.data else None
+        
+        # Get project
+        project_response = admin_client.from_("projects").select("*").eq("id", project_id).single().execute()
+        if not project_response.data:
+            return None
+        
+        project = project_response.data
+        
+        # Get client info
+        if project.get("client_id"):
+            client_response = admin_client.from_("users").select("id, email, username, full_name").eq("id", project["client_id"]).single().execute()
+            project["client"] = client_response.data if client_response.data else {
+                "id": None,
+                "email": "Unknown Client", 
+                "username": "unknown",
+                "full_name": "Unknown Client"
+            }
+        else:
+            project["client"] = {
+                "id": None,
+                "email": "Unknown Client",
+                "username": "unknown",
+                "full_name": "Unknown Client"
+            }
+        
+        # Get tickets for this project
+        tickets_response = admin_client.from_("tickets").select("*").eq("project_id", project["id"]).execute()
+        tickets = tickets_response.data if tickets_response.data else []
+        
+        # For each ticket, get tasks
+        for ticket in tickets:
+            tasks_response = admin_client.from_("tasks").select("*").eq("ticket_id", ticket["id"]).execute()
+            ticket["tasks"] = tasks_response.data if tasks_response.data else []
+        
+        project["tickets"] = tickets
+        
+        return project
     except Exception as e:
         logger.error(f"Error fetching project {project_id}: {str(e)}")
         return None
