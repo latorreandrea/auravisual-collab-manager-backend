@@ -255,12 +255,12 @@ async def create_tasks_bulk(ticket_id: str, tasks: List[Dict]) -> Dict:
         insert_payload = []
         valid_priorities = {"low", "medium", "high", "urgent"}
         for t in tasks:
-            task = t.get("task") or t.get("task") or t.get("task_action")
+            action = t.get("action")
             assigned_to = t.get("assigned_to")
             priority = t.get("priority", "medium")
 
-            if not task or not assigned_to:
-                return {"error": "Each task must include 'task' and 'assigned_to'"}
+            if not action or not assigned_to:
+                return {"error": "Each task must include 'action' and 'assigned_to'"}
             if priority not in valid_priorities:
                 return {"error": f"Invalid priority '{priority}'. Allowed: {list(valid_priorities)}"}
 
@@ -272,7 +272,7 @@ async def create_tasks_bulk(ticket_id: str, tasks: List[Dict]) -> Dict:
             insert_payload.append({
                 "ticket_id": ticket_id,
                 "assigned_to": assigned_to,
-                "task": task,
+                "action": action,
                 "priority": priority,
                 "status": "in_progress"
             })
@@ -329,7 +329,7 @@ def create_project(name: str, client_id: str, website: str = None, socials: str 
         if website:
             project_data["website_url"] = website
         if socials:
-            project_data["socials_links"] = socials
+            project_data["social_links"] = socials
             
         # Insert the project
         response = admin_client.from_("projects").insert(project_data).execute()
