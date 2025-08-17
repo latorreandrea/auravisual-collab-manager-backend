@@ -194,13 +194,13 @@ async def admin_list_projects(current_user: Dict = Depends(require_admin)):
         
         formatted.append({
             "id": p.get("id"),
-            "name": p.get("name") or "Unnamed Project",  # ← Default se vuoto
-            "description": p.get("description") or "",    # ← Stringa vuota invece di null
+            "name": p.get("name") or "Unnamed Project",  
+            "description": p.get("description") or "",   
             "status": p.get("status"),
             "plan": p.get("plan"),
-            "website": p.get("website") or "",            # ← Stringa vuota invece di null
-            "socials": p.get("socials") or [],            # ← Array vuoto invece di null
-            "contract_subscription_date": p.get("contract_subscription_date"),  # ← Mantieni null per date
+            "website": p.get("website_url") or "",
+            "socials": p.get("social_links") or [],        
+            "contract_subscription_date": p.get("contract_subscription_date"), 
             "client": {
                 "id": client.get("id"),
                 "email": client.get("email") or "unknown@example.com",
@@ -251,6 +251,9 @@ async def admin_get_project(project_id: str, current_user: Dict = Depends(requir
         "description": p.get("description"),
         "status": p.get("status"),
         "plan": p.get("plan"),
+        "website": p.get("website_url"),
+        "socials": p.get("social_links"),
+        "contract_subscription_date": p.get("contract_subscription_date"),
         "client": {
             "id": client.get("id"),
             "email": client.get("email"),

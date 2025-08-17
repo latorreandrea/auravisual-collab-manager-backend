@@ -242,107 +242,6 @@ async def create_task(ticket_id: str, assigned_to: str, action: str, priority: s
         return {"error": str(e)}
 
 
-async def get_all_projects_with_relations() -> List[Dict]:
-    """Return all projects with related client, tickets and tasks (admin client)."""
-    try:
-        admin_client = get_supabase_admin_client()
-        response = admin_client.from_("projects").select("""
-            id,
-            name,
-            description,
-            client_id,
-            website,
-            socials,
-            plan,
-            contract_subscription_date,
-            status,
-            created_at,
-            updated_at,
-            clients:client_id ( id, email, username, full_name ),
-            tickets:project_id (
-                id,
-                message,
-                status,
-                task_ids,
-                created_at,
-                updated_at,
-                tasks:ticket_id (
-                    id,
-                    action,
-                    assigned_to,
-                    status,
-                    priority,
-                    created_at,
-                    updated_at
-                )
-            )
-        """).order("created_at", desc=True).execute()
-        
-        # Process and clean data
-        projects = response.data if response.data else []
-        for project in projects:
-            # Ensure client exists or provide default
-            if not project.get("clients"):
-                project["clients"] = {
-                    "id": None,
-                    "email": "Unknown Client",
-                    "username": "unknown",
-                    "full_name": "Unknown Client"
-                }
-            
-            # Clean empty arrays/objects
-            if not project.get("socials"):
-                project["socials"] = []
-            
-            if not project.get("tickets"):
-                project["tickets"] = []
-        
-        return projects
-    except Exception as e:
-        logger.error(f"Error fetching projects with relations: {str(e)}")
-        return []
-
-async def get_project_with_relations(project_id: str) -> Optional[Dict]:
-    """Return single project with related client, tickets and tasks (admin client)."""
-    try:
-        admin_client = get_supabase_admin_client()
-        response = admin_client.from_("projects").select("""
-            id,
-            name,
-            description,
-            client_id,
-            website,
-            socials,
-            plan,
-            contract_subscription_date,
-            status,
-            created_at,
-            updated_at,
-            clients:client_id ( id, email, username, full_name ),
-            tickets:project_id (
-                id,
-                message,
-                status,
-                task_ids,
-                created_at,
-                updated_at,
-                tasks:ticket_id (
-                    id,
-                    action,
-                    assigned_to,
-                    status,
-                    priority,
-                    created_at,
-                    updated_at
-                )
-            )
-        """).eq("id", project_id).single().execute()
-        return response.data if response.data else None
-    except Exception as e:
-        logger.error(f"Error fetching project {project_id}: {str(e)}")
-        return None
-
-
 async def create_tasks_bulk(ticket_id: str, tasks: List[Dict]) -> Dict:
     """Create multiple tasks for a ticket (admin only). Also set ticket status to 'processing'"""
     try:
@@ -423,14 +322,14 @@ def create_project(name: str, client_id: str, website: str = None, socials: str 
         project_data = {
             "name": name,
             "client_id": client_id,
-            "status": "active"
+            "status": "in_development"
         }
         
         # Add optional fields if provided
         if website:
-            project_data["website"] = website
+            project_data["website_url"] = website
         if socials:
-            project_data["socials"] = socials
+            project_data["socials_links"] = socials
             
         # Insert the project
         response = admin_client.from_("projects").insert(project_data).execute()
@@ -444,6 +343,106 @@ def create_project(name: str, client_id: str, website: str = None, socials: str 
     except Exception as e:
         logger.error(f"Error creating project: {str(e)}")
         return {"error": str(e)}
+
+async def get_all_projects_with_relations() -> List[Dict]:
+    """Return all projects with related client, tickets and tasks (admin client)."""
+    try:
+        admin_client = get_supabase_admin_client()
+        response = admin_client.from_("projects").select("""
+            id,
+            name,
+            description,
+            client_id,
+            website_url,
+            social_links,
+            plan,
+            contract_subscription_date,
+            status,
+            created_at,
+            updated_at,
+            clients:client_id ( id, email, username, full_name ),
+            tickets:project_id (
+                id,
+                message,
+                status,
+                task_ids,
+                created_at,
+                updated_at,
+                tasks:ticket_id (
+                    id,
+                    action,
+                    assigned_to,
+                    status,
+                    priority,
+                    created_at,
+                    updated_at
+                )
+            )
+        """).order("created_at", desc=True).execute()
+        
+        # Process and clean data
+        projects = response.data if response.data else []
+        for project in projects:
+            # Ensure client exists or provide default
+            if not project.get("clients"):
+                project["clients"] = {
+                    "id": None,
+                    "email": "Unknown Client",
+                    "username": "unknown",
+                    "full_name": "Unknown Client"
+                }
+            
+            # Clean empty arrays/objects
+            if not project.get("social_links"):
+                project["social_links"] = []
+            
+            if not project.get("tickets"):
+                project["tickets"] = []
+        
+        return projects
+    except Exception as e:
+        logger.error(f"Error fetching projects with relations: {str(e)}")
+        return []
+
+async def get_project_with_relations(project_id: str) -> Optional[Dict]:
+    """Return single project with related client, tickets and tasks (admin client)."""
+    try:
+        admin_client = get_supabase_admin_client()
+        response = admin_client.from_("projects").select("""
+            id,
+            name,
+            description,
+            client_id,
+            website_url,
+            social_links,
+            plan,
+            contract_subscription_date,
+            status,
+            created_at,
+            updated_at,
+            clients:client_id ( id, email, username, full_name ),
+            tickets:project_id (
+                id,
+                message,
+                status,
+                task_ids,
+                created_at,
+                updated_at,
+                tasks:ticket_id (
+                    id,
+                    action,
+                    assigned_to,
+                    status,
+                    priority,
+                    created_at,
+                    updated_at
+                )
+            )
+        """).eq("id", project_id).single().execute()
+        return response.data if response.data else None
+    except Exception as e:
+        logger.error(f"Error fetching project {project_id}: {str(e)}")
+        return None
 
 # Database dependencies for FastAPI
 def get_db() -> Client:
