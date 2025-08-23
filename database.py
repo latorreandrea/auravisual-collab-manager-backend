@@ -120,6 +120,67 @@ async def get_user_task_counts(user_id: str) -> Dict:
             "active_tasks": 0
         }
 
+
+async def get_dashboard_stats() -> Dict:
+    """Get dashboard statistics for admin"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Count total projects
+        projects_response = admin_client.from_("projects").select("id", count="exact").execute()
+        total_projects = projects_response.count or 0
+        
+        # Count active projects (in_development status)
+        active_projects_response = admin_client.from_("projects").select("id", count="exact").eq("status", "in_development").execute()
+        active_projects = active_projects_response.count or 0
+        
+        # Count total clients
+        clients_response = admin_client.from_("users").select("id", count="exact").eq("role", "client").execute()
+        total_clients = clients_response.count or 0
+        
+        # Count open tickets (to_read, processing)
+        open_tickets_response = admin_client.from_("tickets").select("id", count="exact").in_("status", ["to_read", "processing"]).execute()
+        open_tickets = open_tickets_response.count or 0
+        
+        # Count active tasks (in_progress)
+        active_tasks_response = admin_client.from_("tasks").select("id", count="exact").eq("status", "in_progress").execute()
+        active_tasks = active_tasks_response.count or 0
+        
+        # Count total staff
+        staff_response = admin_client.from_("users").select("id", count="exact").eq("role", "internal_staff").execute()
+        total_staff = staff_response.count or 0
+        
+        return {
+            "projects": {
+                "total": total_projects,
+                "active": active_projects,
+                "completed": total_projects - active_projects
+            },
+            "clients": {
+                "total": total_clients
+            },
+            "staff": {
+                "total": total_staff
+            },
+            "tickets": {
+                "open": open_tickets
+            },
+            "tasks": {
+                "active": active_tasks
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching dashboard stats: {str(e)}")
+        return {
+            "projects": {"total": 0, "active": 0, "completed": 0},
+            "clients": {"total": 0},
+            "staff": {"total": 0},
+            "tickets": {"open": 0},
+            "tasks": {"active": 0}
+        }
+
+
 async def get_tasks_by_user(user_id: str, status_filter: str = None) -> List[Dict]:
     """Get tasks assigned to a specific user with optional status filter"""
     try:
@@ -432,6 +493,241 @@ async def get_project_with_relations(project_id: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Error fetching project {project_id}: {str(e)}")
         return None
+
+async def get_users_by_role_with_projects(role: str) -> List[Dict]:
+    """Get users by role with project counts (for clients)"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Get users by role
+        response = admin_client.from_("users").select("*").eq("role", role).order("created_at").execute()
+        users = response.data if response.data else []
+        
+        # Add project counts for each user (only for clients)
+        for user in users:
+            if role == "client":
+                # Count projects for this client
+                projects_response = admin_client.from_("projects").select("id", count="exact").eq("client_id", user["id"]).execute()
+                user["projects_count"] = projects_response.count if projects_response.count else 0
+                
+            else:
+                user["projects_count"] = 0
+                       
+        return users
+        
+    except Exception as e:
+        logger.error(f"Error fetching users with role {role}: {str(e)}")
+        return []
+
+
+async def get_client_projects(client_id: str) -> List[Dict]:
+    """Get projects for a specific client"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Get projects for this client
+        projects_response = admin_client.from_("projects").select("*").eq("client_id", client_id).order("created_at", desc=True).execute()
+        projects = projects_response.data if projects_response.data else []
+        
+        # For each project, get basic ticket counts
+        for project in projects:
+            # Count total tickets for this project
+            tickets_response = admin_client.from_("tickets").select("id", count="exact").eq("project_id", project["id"]).execute()
+            project["tickets_count"] = tickets_response.count if tickets_response.count else 0
+            
+            # Count open tickets for this project
+            open_tickets_response = admin_client.from_("tickets").select("id", count="exact").eq("project_id", project["id"]).in_("status", ["to_read", "processing"]).execute()
+            project["open_tickets_count"] = open_tickets_response.count if open_tickets_response.count else 0
+        
+        return projects
+        
+    except Exception as e:
+        logger.error(f"Error fetching projects for client {client_id}: {str(e)}")
+        return []
+
+async def create_ticket(project_id: str, client_id: str, message: str) -> Dict:
+    """Create a new ticket for a project (client only)"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Verify project exists and belongs to the client
+        project_check = admin_client.from_("projects").select("id, client_id, name").eq("id", project_id).single().execute()
+        if not project_check.data:
+            return {"error": "Project not found"}
+        
+        if project_check.data.get("client_id") != client_id:
+            return {"error": "You can only create tickets for your own projects"}
+        
+        # Create ticket data
+        ticket_data = {
+            "project_id": project_id,
+            "client_id": client_id,
+            "message": message,
+            "status": "to_read"  # Default status for new tickets
+        }
+        
+        # Insert the ticket
+        response = admin_client.from_("tickets").insert(ticket_data).execute()
+        
+        if response.data:
+            logger.info(f"Ticket created successfully: {response.data[0].get('id')}")
+            return {"ticket": response.data[0]}
+        else:
+            return {"error": "Failed to create ticket"}
+            
+    except Exception as e:
+        logger.error(f"Error creating ticket: {str(e)}")
+        return {"error": str(e)}
+
+async def get_client_tickets(client_id: str, project_id: str = None) -> List[Dict]:
+    """Get tickets for a client, optionally filtered by project, with task details"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Build query
+        query = admin_client.from_("tickets").select("""
+            id,
+            project_id,
+            message,
+            status,
+            created_at,
+            updated_at,
+            projects:project_id (
+                id,
+                name,
+                status
+            )
+        """).eq("client_id", client_id)
+        
+        # Filter by project if specified
+        if project_id:
+            query = query.eq("project_id", project_id)
+        
+        response = query.order("created_at", desc=True).execute()
+        tickets = response.data if response.data else []
+        
+        # For each ticket, get task details
+        for ticket in tickets:
+            # Get tasks with assigned user info
+            tasks_response = admin_client.from_("tasks").select("""
+                id,
+                action,
+                priority,
+                status,
+                created_at,
+                updated_at,
+                users:assigned_to (
+                    full_name,
+                    username
+                )
+            """).eq("ticket_id", ticket["id"]).order("created_at", desc=True).execute()
+            
+            tasks = tasks_response.data if tasks_response.data else []
+            
+            # Format tasks for client view
+            formatted_tasks = []
+            for task in tasks:
+                assigned_user = task.get("users") or {}
+                formatted_task = {
+                    "id": task.get("id"),
+                    "action": task.get("action"),
+                    "priority": task.get("priority"),
+                    "status": task.get("status"),
+                    "assigned_to": {
+                        "name": assigned_user.get("full_name") or "Staff Member",
+                        "username": assigned_user.get("username") or "staff"
+                    },
+                    "created_at": task.get("created_at"),
+                    "updated_at": task.get("updated_at")
+                }
+                formatted_tasks.append(formatted_task)
+            
+            # Add task statistics
+            ticket["tasks"] = formatted_tasks
+            ticket["tasks_count"] = len(formatted_tasks)
+            ticket["completed_tasks"] = len([t for t in formatted_tasks if t["status"] == "completed"])
+            ticket["active_tasks"] = len([t for t in formatted_tasks if t["status"] == "in_progress"])
+        
+        return tickets
+        
+    except Exception as e:
+        logger.error(f"Error fetching tickets for client {client_id}: {str(e)}")
+        return []
+
+
+async def get_client_ticket_with_tasks(client_id: str, ticket_id: str) -> Optional[Dict]:
+    """Get a specific ticket with its tasks for a client"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Get ticket and verify ownership
+        ticket_response = admin_client.from_("tickets").select("""
+            id,
+            project_id,
+            message,
+            status,
+            created_at,
+            updated_at,
+            projects:project_id (
+                id,
+                name,
+                status
+            )
+        """).eq("id", ticket_id).eq("client_id", client_id).single().execute()
+        
+        if not ticket_response.data:
+            return None
+        
+        ticket = ticket_response.data
+        
+        # Get tasks for this ticket with assigned user details
+        tasks_response = admin_client.from_("tasks").select("""
+            id,
+            action,
+            priority,
+            status,
+            created_at,
+            updated_at,
+            users:assigned_to (
+                id,
+                full_name,
+                username,
+                email
+            )
+        """).eq("ticket_id", ticket_id).order("created_at", desc=True).execute()
+        
+        tasks = tasks_response.data if tasks_response.data else []
+        
+        # Format tasks for client view (hide sensitive info)
+        formatted_tasks = []
+        for task in tasks:
+            assigned_user = task.get("users") or {}
+            formatted_task = {
+                "id": task.get("id"),
+                "action": task.get("action"),
+                "priority": task.get("priority"),
+                "status": task.get("status"),
+                "assigned_to": {
+                    "name": assigned_user.get("full_name") or "Staff Member",
+                    "username": assigned_user.get("username") or "staff"
+                    # Hide email for privacy
+                },
+                "created_at": task.get("created_at"),
+                "updated_at": task.get("updated_at")
+            }
+            formatted_tasks.append(formatted_task)
+        
+        ticket["tasks"] = formatted_tasks
+        ticket["tasks_count"] = len(formatted_tasks)
+        ticket["completed_tasks"] = len([t for t in formatted_tasks if t["status"] == "completed"])
+        ticket["active_tasks"] = len([t for t in formatted_tasks if t["status"] == "in_progress"])
+        
+        return ticket
+        
+    except Exception as e:
+        logger.error(f"Error fetching ticket {ticket_id} for client {client_id}: {str(e)}")
+        return None
+
 
 # Database dependencies for FastAPI
 def get_db() -> Client:

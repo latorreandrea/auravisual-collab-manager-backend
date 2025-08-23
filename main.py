@@ -4,6 +4,7 @@ from config import settings, get_app_config, get_cors_config, get_server_config
 from supabase import create_client
 from utils.auth import get_current_user, require_admin, require_admin_or_staff
 from typing import Dict
+from datetime import datetime
 
 from database import (
     test_connection, get_db, get_all_users, 
@@ -12,7 +13,9 @@ from database import (
     Client, get_supabase_client, create_task,
     get_supabase_admin_client, get_user_by_id,
     get_all_projects_with_relations, get_project_with_relations,
-    create_tasks_bulk, create_project
+    create_tasks_bulk, create_project, get_users_by_role_with_projects,
+    get_dashboard_stats, get_client_projects, create_ticket, get_client_tickets,
+    get_client_ticket_with_tasks
 )
 
 # Initialize FastAPI app with centralized configuration
@@ -65,13 +68,49 @@ async def list_all_users(current_user: Dict = Depends(require_admin)):
 
 @app.get("/admin/users/clients")
 async def list_clients(current_user: Dict = Depends(require_admin_or_staff)):
-    """List all clients (admin/staff only)"""
-    clients = await get_users_by_role("client")
+    """List all clients with project counts (admin/staff only)"""
+    clients = await get_users_by_role_with_projects("client")
+    
+    # Format response to include project information
+    formatted_clients = []
+    for client in clients:
+        formatted_client = {
+            "id": client.get("id"),
+            "email": client.get("email"),
+            "username": client.get("username"),
+            "full_name": client.get("full_name"),
+            "role": client.get("role"),
+            "is_active": client.get("is_active"),
+            "created_at": client.get("created_at"),
+            "projects_count": client.get("projects_count", 0),
+        }
+        formatted_clients.append(formatted_client)
+    
     return {
-        "total_clients": len(clients),
-        "clients": clients,
+        "total_clients": len(formatted_clients),
+        "clients": formatted_clients,
         "requested_by": current_user.get("username")
     }
+
+
+@app.get("/admin/dashboard")
+async def admin_dashboard(current_user: Dict = Depends(require_admin)):
+    """Get dashboard statistics (admin only)"""
+    stats = await get_dashboard_stats()
+    
+    return {
+        "dashboard": stats,
+        "summary": {
+            "total_active_projects": stats["projects"]["active"],
+            "total_clients": stats["clients"]["total"],
+            "open_tickets": stats["tickets"]["open"],
+            "active_tasks": stats["tasks"]["active"],
+            "total_staff": stats["staff"]["total"]
+        },
+        "requested_by": current_user.get("username"),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
 
 @app.get("/admin/users/staff")
 async def list_internal_staff(current_user: Dict = Depends(require_admin)):
@@ -605,6 +644,328 @@ async def get_current_user_info(current_user: Dict = Depends(get_current_user)):
         "user": current_user,
         "authenticated": True
     }
+
+# CLIENT API - PROJECTS AND TICKETS
+@app.get("/client/projects")
+async def client_list_projects(current_user: Dict = Depends(get_current_user)):
+    """List projects for the current client"""
+    user_role = current_user.get("role")
+    if user_role != "client":
+        raise HTTPException(status_code=403, detail="Only clients can access this endpoint")
+    
+    client_id = current_user.get("id")
+    projects = await get_client_projects(client_id)
+    
+    # Format response
+    formatted_projects = []
+    for project in projects:
+        formatted_project = {
+            "id": project.get("id"),
+            "name": project.get("name"),
+            "description": project.get("description"),
+            "status": project.get("status"),
+            "plan": project.get("plan"),
+            "website": project.get("website_url"),
+            "socials": project.get("social_links"),
+            "contract_subscription_date": project.get("contract_subscription_date"),
+            "tickets_count": project.get("tickets_count", 0),
+            "open_tickets_count": project.get("open_tickets_count", 0),
+            "created_at": project.get("created_at"),
+            "updated_at": project.get("updated_at")
+        }
+        formatted_projects.append(formatted_project)
+    
+    return {
+        "total_projects": len(formatted_projects),
+        "projects": formatted_projects,
+        "client_id": client_id,
+        "requested_by": current_user.get("username")
+    }
+
+@app.post("/client/projects/{project_id}/tickets")
+async def client_create_ticket(
+    project_id: str,
+    ticket_data: dict,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Create a new ticket for a project (client only)"""
+    try:
+        # Verify user is a client
+        user_role = current_user.get("role")
+        if user_role != "client":
+            raise HTTPException(status_code=403, detail="Only clients can create tickets")
+        
+        # Extract and validate data
+        message = ticket_data.get("message")
+        if not message:
+            raise HTTPException(status_code=400, detail="Message is required")
+        
+        if len(message.strip()) < 10:
+            raise HTTPException(status_code=400, detail="Message must be at least 10 characters long")
+        
+        client_id = current_user.get("id")
+        
+        # Create ticket
+        result = await create_ticket(project_id, client_id, message.strip())
+        
+        if "error" in result:
+            if "not found" in result["error"]:
+                raise HTTPException(status_code=404, detail=result["error"])
+            elif "your own projects" in result["error"]:
+                raise HTTPException(status_code=403, detail=result["error"])
+            else:
+                raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "message": "Ticket created successfully",
+            "ticket": result.get("ticket"),
+            "project_id": project_id,
+            "created_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating ticket: {str(e)}")
+
+@app.get("/client/tickets")
+async def client_list_tickets(
+    project_id: str = None,
+    current_user: Dict = Depends(get_current_user)
+):
+    """List tickets for the current client with task details, optionally filtered by project"""
+    user_role = current_user.get("role")
+    if user_role != "client":
+        raise HTTPException(status_code=403, detail="Only clients can access this endpoint")
+    
+    client_id = current_user.get("id")
+    tickets = await get_client_tickets(client_id, project_id)
+    
+    # Format response 
+    formatted_tickets = []
+    for ticket in tickets:
+        project_info = ticket.get("projects") or {}
+        formatted_ticket = {
+            "id": ticket.get("id"),
+            "message": ticket.get("message"),
+            "status": ticket.get("status"),
+            "project": {
+                "id": project_info.get("id"),
+                "name": project_info.get("name"),
+                "status": project_info.get("status")
+            },
+            "tasks": ticket.get("tasks", []),  
+            "tasks_summary": {
+                "total": ticket.get("tasks_count", 0),
+                "active": ticket.get("active_tasks", 0),
+                "completed": ticket.get("completed_tasks", 0)
+            },
+            "created_at": ticket.get("created_at"),
+            "updated_at": ticket.get("updated_at")
+        }
+        formatted_tickets.append(formatted_ticket)
+    
+    return {
+        "total_tickets": len(formatted_tickets),
+        "tickets": formatted_tickets,
+        "project_filter": project_id,
+        "client_id": client_id,
+        "requested_by": current_user.get("username")
+    }
+
+@app.get("/client/projects/{project_id}")
+async def client_get_project(
+    project_id: str,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Get single project details for the current client"""
+    user_role = current_user.get("role")
+    if user_role != "client":
+        raise HTTPException(status_code=403, detail="Only clients can access this endpoint")
+    
+    client_id = current_user.get("id")
+    
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Get project and verify ownership
+        project_response = admin_client.from_("projects").select("*").eq("id", project_id).eq("client_id", client_id).single().execute()
+        
+        if not project_response.data:
+            raise HTTPException(status_code=404, detail="Project not found or access denied")
+        
+        project = project_response.data
+        
+        # Get tickets for this project
+        tickets = await get_client_tickets(client_id, project_id)
+        
+        # Format response
+        formatted_project = {
+            "id": project.get("id"),
+            "name": project.get("name"),
+            "description": project.get("description"),
+            "status": project.get("status"),
+            "plan": project.get("plan"),
+            "website": project.get("website_url"),
+            "socials": project.get("social_links"),
+            "contract_subscription_date": project.get("contract_subscription_date"),
+            "tickets_count": len(tickets),
+            "tickets": tickets,
+            "created_at": project.get("created_at"),
+            "updated_at": project.get("updated_at")
+        }
+        
+        return {
+            "project": formatted_project,
+            "client_id": client_id,
+            "requested_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching project: {str(e)}")    
+
+
+@app.get("/client/tickets/{ticket_id}")
+async def client_get_ticket_details(
+    ticket_id: str,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Get detailed ticket information with tasks for the current client"""
+    user_role = current_user.get("role")
+    if user_role != "client":
+        raise HTTPException(status_code=403, detail="Only clients can access this endpoint")
+    
+    client_id = current_user.get("id")
+    
+    # Get ticket with tasks
+    ticket = await get_client_ticket_with_tasks(client_id, ticket_id)
+    
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found or access denied")
+    
+    # Format response
+    project_info = ticket.get("projects") or {}
+    formatted_ticket = {
+        "id": ticket.get("id"),
+        "message": ticket.get("message"),
+        "status": ticket.get("status"),
+        "project": {
+            "id": project_info.get("id"),
+            "name": project_info.get("name"),
+            "status": project_info.get("status")
+        },
+        "tasks": ticket.get("tasks", []),
+        "tasks_summary": {
+            "total": ticket.get("tasks_count", 0),
+            "active": ticket.get("active_tasks", 0),
+            "completed": ticket.get("completed_tasks", 0)
+        },
+        "created_at": ticket.get("created_at"),
+        "updated_at": ticket.get("updated_at")
+    }
+    
+    return {
+        "ticket": formatted_ticket,
+        "client_id": client_id,
+        "requested_by": current_user.get("username")
+    }
+
+
+@app.get("/client/projects/{project_id}/tickets/{ticket_id}/tasks")
+async def client_get_ticket_tasks(
+    project_id: str,
+    ticket_id: str,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Get all tasks for a specific ticket in a project (client only)"""
+    user_role = current_user.get("role")
+    if user_role != "client":
+        raise HTTPException(status_code=403, detail="Only clients can access this endpoint")
+    
+    client_id = current_user.get("id")
+    
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Verify project and ticket ownership
+        ticket_check = admin_client.from_("tickets").select("""
+            id,
+            project_id,
+            client_id,
+            message,
+            status
+        """).eq("id", ticket_id).eq("project_id", project_id).eq("client_id", client_id).single().execute()
+        
+        if not ticket_check.data:
+            raise HTTPException(status_code=404, detail="Ticket not found or access denied")
+        
+        ticket_info = ticket_check.data
+        
+        # Get tasks for this ticket
+        tasks_response = admin_client.from_("tasks").select("""
+            id,
+            action,
+            priority,
+            status,
+            created_at,
+            updated_at,
+            users:assigned_to (
+                full_name,
+                username
+            )
+        """).eq("ticket_id", ticket_id).order("created_at", desc=True).execute()
+        
+        tasks = tasks_response.data if tasks_response.data else []
+        
+        # Format tasks for client view
+        formatted_tasks = []
+        for task in tasks:
+            assigned_user = task.get("users") or {}
+            formatted_task = {
+                "id": task.get("id"),
+                "action": task.get("action"),
+                "priority": task.get("priority"),
+                "status": task.get("status"),
+                "assigned_to": {
+                    "name": assigned_user.get("full_name") or "Staff Member",
+                    "username": assigned_user.get("username") or "staff"
+                },
+                "created_at": task.get("created_at"),
+                "updated_at": task.get("updated_at")
+            }
+            formatted_tasks.append(formatted_task)
+        
+        # Calculate statistics
+        total_tasks = len(formatted_tasks)
+        completed_tasks = len([t for t in formatted_tasks if t["status"] == "completed"])
+        active_tasks = len([t for t in formatted_tasks if t["status"] == "in_progress"])
+        
+        return {
+            "ticket": {
+                "id": ticket_info.get("id"),
+                "message": ticket_info.get("message"),
+                "status": ticket_info.get("status")
+            },
+            "project_id": project_id,
+            "tasks": formatted_tasks,
+            "tasks_summary": {
+                "total": total_tasks,
+                "active": active_tasks,
+                "completed": completed_tasks,
+                "progress_percentage": round((completed_tasks / total_tasks * 100), 1) if total_tasks > 0 else 0
+            },
+            "client_id": client_id,
+            "requested_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching tasks: {str(e)}")
+
+
 # Debug endpoints (only in development and with admin access)
 if settings.debug:
     @app.get("/debug/config")

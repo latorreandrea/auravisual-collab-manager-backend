@@ -1,8 +1,8 @@
 # Auravisual Collab Manager - Backend API
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green) ![Python](https://img.shields.io/badge/python-3.11+-blue)
+![Version](https://img.shields.io/badge/version-2.0.0-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green) ![Python](https://img.shields.io/badge/python-3.11+-blue)
 
-Auravisual Collab Manager is a lightweight, full-stack project management platform built with **FastAPI**, **Supabase**, and **Flutter**. It is designed to help small teams effectively manage projects, tasks, deadlines, and multi-user collaboration.
+Auravisual Collab Manager is a comprehensive, full-stack project management platform built with **FastAPI**, **Supabase**, and **Flutter**. It is designed to help agencies and teams effectively manage client projects, tasks, communication, and collaboration workflows.
 
 ## 🚀 Key Features
 
@@ -10,9 +10,12 @@ Auravisual Collab Manager is a lightweight, full-stack project management platfo
 - 👥 **Role-based Access Control** (Admin, Internal Staff, Client)
 - 🛡️ **Row Level Security** (RLS) for data protection
 - 📊 **RESTful API** with comprehensive endpoints
-- 🏗️ **Project Management** with full CRUD operations
-- 📋 **Task Management** with status tracking and assignment
-- 🎫 **Ticket System** for client communication
+- 🏗️ **Complete Project Management** with client assignment and tracking
+- 📋 **Advanced Task Management** with status tracking, priority levels, and assignment
+- 🎫 **Client Ticket System** for seamless client-team communication
+- 📈 **Admin Dashboard** with real-time statistics and insights
+- 👤 **Client Portal** with project visibility and task progress monitoring
+- 🔄 **Multi-role Workflows** for admin, staff, and client interactions
 - 🐳 **Docker-ready** for easy deployment
 - 🌐 **CORS Configuration** for cross-origin requests
 - 📱 **Cross-platform** frontend support (Flutter)
@@ -101,7 +104,149 @@ docker run -p 8000:8000 --env-file .env auravisual-backend
 
 ---
 
-## 📋 API Documentation
+## � Management Workflows
+
+### 👨‍💼 Admin Workflow
+**Complete system management and oversight**
+
+1. **User Management**
+   - Create clients via `POST /auth/register`
+   - Create internal staff accounts
+   - View all users and their statistics
+   - Access dashboard with system metrics
+
+2. **Project Management**
+   - Create projects for clients via `POST /admin/projects`
+   - View all projects with client relations and status
+   - Monitor project progress and ticket activity
+   - Access comprehensive project analytics
+
+3. **Task & Ticket Management**
+   - View all tickets from clients
+   - Create individual tasks via `POST /admin/tasks`
+   - Create bulk tasks for tickets via `POST /admin/tickets/{id}/tasks`
+   - Monitor task assignments and completion rates
+   - Update ticket status as work progresses
+
+4. **Dashboard & Analytics**
+   - Access real-time statistics via `GET /admin/dashboard`
+   - Monitor active projects, open tickets, and task progress
+   - Track client and staff performance metrics
+
+### 👨‍💻 Internal Staff Workflow
+**Task execution and project development**
+
+1. **Task Management**
+   - View assigned tasks via `GET /tasks/my`
+   - Focus on active tasks via `GET /tasks/my/active`
+   - Update task status as work progresses via `PATCH /tasks/{id}/status`
+   - Track personal task statistics and workload
+
+2. **Project Visibility**
+   - View all projects they're involved in
+   - Access project details and client information
+   - Monitor ticket requirements and client feedback
+
+3. **Collaboration**
+   - Work with task priorities (low, medium, high, urgent)
+   - Coordinate with team members on project delivery
+   - Update task completion status for client transparency
+
+### 👤 Client Workflow
+**Project monitoring and communication**
+
+1. **Project Visibility**
+   - View all their projects via `GET /client/projects`
+   - Access detailed project information via `GET /client/projects/{id}`
+   - Monitor project status and progress
+   - Track project timeline and milestones
+
+2. **Communication via Tickets**
+   - Create tickets for project requests via `POST /client/projects/{id}/tickets`
+   - Submit feedback, change requests, and bug reports
+   - View all their tickets across projects via `GET /client/tickets`
+   - Filter tickets by specific projects
+
+3. **Progress Monitoring**
+   - View detailed ticket information via `GET /client/tickets/{id}`
+   - Monitor task progress for each ticket
+   - See which team members are working on their requests
+   - Track task completion status and priority levels
+   - Access task details via `GET /client/projects/{id}/tickets/{id}/tasks`
+
+---
+
+## 🎯 Typical Project Lifecycle
+
+### Phase 1: Project Setup (Admin)
+```bash
+# 1. Admin creates client account
+POST /auth/register
+{
+  "email": "client@company.com",
+  "password": "SecurePass123",
+  "full_name": "Client Company Ltd",
+  "role": "client"
+}
+
+# 2. Admin creates project for client
+POST /admin/projects
+{
+  "name": "Company Website Redesign",
+  "client_id": "client-uuid",
+  "website": "https://company.com",
+  "socials": "instagram: @company"
+}
+```
+
+### Phase 2: Client Communication
+```bash
+# Client creates tickets for requirements
+POST /client/projects/{project_id}/tickets
+{
+  "message": "I need the header color changed to match our brand colors"
+}
+```
+
+### Phase 3: Task Management (Admin)
+```bash
+# Admin creates tasks for the ticket
+POST /admin/tickets/{ticket_id}/tasks
+{
+  "tasks": [
+    {
+      "action": "Update header CSS with new brand colors",
+      "assigned_to": "staff-uuid",
+      "priority": "high"
+    },
+    {
+      "action": "Test color changes across all pages",
+      "assigned_to": "tester-uuid", 
+      "priority": "medium"
+    }
+  ]
+}
+```
+
+### Phase 4: Development (Staff)
+```bash
+# Staff updates task status as work progresses
+PATCH /tasks/{task_id}/status
+{
+  "status": "completed"
+}
+```
+
+### Phase 5: Client Monitoring
+```bash
+# Client monitors progress
+GET /client/tickets/{ticket_id}
+# Shows tasks, assigned staff, and completion status
+```
+
+---
+
+## �📋 API Documentation
 
 ### Base URL
 - **Production**: `https://app.auravisual.dk`
@@ -788,6 +933,340 @@ curl -X POST https://app.auravisual.dk/admin/projects \
 
 ---
 
+### GET /admin/dashboard
+Description: Admin endpoint that returns comprehensive system statistics including active projects, clients, open tickets, and active tasks.
+Authentication: Bearer token (admin only)
+
+Response:
+
+```json
+{
+  "dashboard": {
+    "projects": {
+      "total": 15,
+      "active": 8,
+      "completed": 7
+    },
+    "clients": {
+      "total": 12
+    },
+    "staff": {
+      "total": 4
+    },
+    "tickets": {
+      "open": 23
+    },
+    "tasks": {
+      "active": 45
+    }
+  },
+  "summary": {
+    "total_active_projects": 8,
+    "total_clients": 12,
+    "open_tickets": 23,
+    "active_tasks": 45,
+    "total_staff": 4
+  },
+  "requested_by": "admin_username",
+  "timestamp": "2025-08-17T16:00:00Z"
+}
+```
+
+Example curl:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://app.auravisual.dk/admin/dashboard
+```
+
+---
+
+### GET /admin/users/clients
+Description: List all clients with project counts and recent projects information.
+Authentication: Bearer token (admin/staff)
+
+Response:
+
+```json
+{
+  "total_clients": 3,
+  "clients": [
+    {
+      "id": "uuid-client-1",
+      "email": "client@example.com",
+      "username": "client1",
+      "full_name": "Client Company",
+      "role": "client",
+      "is_active": true,
+      "created_at": "2025-01-01T10:00:00Z",
+      "projects_count": 2,
+      "recent_projects": [
+        {
+          "id": "uuid-project-1",
+          "name": "Website Redesign",
+          "status": "in_development",
+          "created_at": "2025-01-15T10:00:00Z"
+        }
+      ]
+    }
+  ],
+  "requested_by": "admin_username"
+}
+```
+
+Example curl:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://app.auravisual.dk/admin/users/clients
+```
+
+---
+
+## 👤 Client API Endpoints
+
+### GET /client/projects
+Description: List all projects for the current authenticated client with ticket statistics.
+Authentication: Bearer token (client only)
+
+Response:
+
+```json
+{
+  "total_projects": 2,
+  "projects": [
+    {
+      "id": "uuid-project-1",
+      "name": "Website E-commerce",
+      "description": "Complete e-commerce solution",
+      "status": "in_development",
+      "plan": "Aura Boost",
+      "website": "https://example.com",
+      "socials": "instagram: @example",
+      "tickets_count": 3,
+      "open_tickets_count": 1,
+      "created_at": "2025-01-01T10:00:00Z"
+    }
+  ],
+  "client_id": "uuid-client-1",
+  "requested_by": "client_username"
+}
+```
+
+Example curl:
+
+```bash
+curl -H "Authorization: Bearer $CLIENT_TOKEN" \
+  https://app.auravisual.dk/client/projects
+```
+
+---
+
+### POST /client/projects/{project_id}/tickets
+Description: Create a new ticket for a specific project (client can only create tickets for their own projects).
+Authentication: Bearer token (client only)
+
+Request body:
+
+```json
+{
+  "message": "I would like to change the header color to match our brand colors better"
+}
+```
+
+Response:
+
+```json
+{
+  "message": "Ticket created successfully",
+  "ticket": {
+    "id": "uuid-ticket-new",
+    "project_id": "uuid-project-1",
+    "client_id": "uuid-client-1",
+    "message": "I would like to change the header color...",
+    "status": "to_read",
+    "created_at": "2025-08-17T16:30:00Z"
+  },
+  "project_id": "uuid-project-1",
+  "created_by": "client_username"
+}
+```
+
+Example curl:
+
+```bash
+curl -X POST https://app.auravisual.dk/client/projects/PROJECT_UUID/tickets \
+  -H "Authorization: Bearer $CLIENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Please update the contact form validation"}'
+```
+
+---
+
+### GET /client/tickets
+Description: List all tickets for the current client with task details and progress information.
+Authentication: Bearer token (client only)
+
+Query Parameters:
+- `project_id` (optional): Filter tickets by specific project
+
+Response:
+
+```json
+{
+  "total_tickets": 2,
+  "tickets": [
+    {
+      "id": "uuid-ticket-1",
+      "message": "Change header color to brand green",
+      "status": "processing",
+      "project": {
+        "id": "uuid-project-1",
+        "name": "Website E-commerce",
+        "status": "in_development"
+      },
+      "tasks": [
+        {
+          "id": "uuid-task-1",
+          "action": "Update CSS header color",
+          "priority": "medium",
+          "status": "in_progress",
+          "assigned_to": {
+            "name": "Marco Developer",
+            "username": "marco_dev"
+          },
+          "created_at": "2025-08-17T10:00:00Z"
+        }
+      ],
+      "tasks_summary": {
+        "total": 2,
+        "active": 1,
+        "completed": 1
+      },
+      "created_at": "2025-08-17T09:00:00Z"
+    }
+  ],
+  "project_filter": null,
+  "client_id": "uuid-client-1",
+  "requested_by": "client_username"
+}
+```
+
+Example curl:
+
+```bash
+# All tickets
+curl -H "Authorization: Bearer $CLIENT_TOKEN" \
+  https://app.auravisual.dk/client/tickets
+
+# Tickets for specific project
+curl -H "Authorization: Bearer $CLIENT_TOKEN" \
+  "https://app.auravisual.dk/client/tickets?project_id=PROJECT_UUID"
+```
+
+---
+
+### GET /client/tickets/{ticket_id}
+Description: Get detailed information about a specific ticket including all associated tasks and their progress.
+Authentication: Bearer token (client only)
+
+Response:
+
+```json
+{
+  "ticket": {
+    "id": "uuid-ticket-1",
+    "message": "Change header color to brand green",
+    "status": "processing",
+    "project": {
+      "id": "uuid-project-1",
+      "name": "Website E-commerce",
+      "status": "in_development"
+    },
+    "tasks": [
+      {
+        "id": "uuid-task-1",
+        "action": "Update CSS header color from blue to green",
+        "priority": "medium",
+        "status": "in_progress",
+        "assigned_to": {
+          "name": "Marco Developer",
+          "username": "marco_dev"
+        },
+        "created_at": "2025-08-17T10:00:00Z",
+        "updated_at": "2025-08-17T10:30:00Z"
+      }
+    ],
+    "tasks_summary": {
+      "total": 2,
+      "active": 1,
+      "completed": 1
+    },
+    "created_at": "2025-08-17T09:00:00Z",
+    "updated_at": "2025-08-17T10:00:00Z"
+  },
+  "client_id": "uuid-client-1",
+  "requested_by": "client_username"
+}
+```
+
+Example curl:
+
+```bash
+curl -H "Authorization: Bearer $CLIENT_TOKEN" \
+  https://app.auravisual.dk/client/tickets/TICKET_UUID
+```
+
+---
+
+### GET /client/projects/{project_id}/tickets/{ticket_id}/tasks
+Description: Get all tasks for a specific ticket with detailed progress information and completion percentage.
+Authentication: Bearer token (client only)
+
+Response:
+
+```json
+{
+  "ticket": {
+    "id": "uuid-ticket-1",
+    "message": "Change header color to brand green",
+    "status": "processing"
+  },
+  "project_id": "uuid-project-1",
+  "tasks": [
+    {
+      "id": "uuid-task-1",
+      "action": "Update CSS header color from blue to green",
+      "priority": "medium",
+      "status": "in_progress",
+      "assigned_to": {
+        "name": "Marco Developer",
+        "username": "marco_dev"
+      },
+      "created_at": "2025-08-17T10:00:00Z",
+      "updated_at": "2025-08-17T10:30:00Z"
+    }
+  ],
+  "tasks_summary": {
+    "total": 2,
+    "active": 1,
+    "completed": 1,
+    "progress_percentage": 50.0
+  },
+  "client_id": "uuid-client-1",
+  "requested_by": "client_username"
+}
+```
+
+Example curl:
+
+```bash
+curl -H "Authorization: Bearer $CLIENT_TOKEN" \
+  https://app.auravisual.dk/client/projects/PROJECT_UUID/tickets/TICKET_UUID/tasks
+```
+
+---
+
 ### POST /admin/tasks
 Description: Admin creates a single task.
 Authentication: Bearer token (admin)
@@ -912,18 +1391,109 @@ curl -X PATCH https://app.auravisual.dk/tasks/TASK_UUID/status \
 
 ## 🔄 Recent Updates
 
-### Version 1.2.0 (August 2025)
-- ✅ **NEW: Project Creation Endpoint** - Admin users can now create new projects via `POST /admin/projects`
-- ✅ **Enhanced Project Management** - Added comprehensive project creation with validation
-- ✅ **Optional Fields Support** - Website and social media fields are now optional in project creation
-- ✅ **Improved Error Handling** - Better error messages for project creation validation
-- ✅ **Updated Documentation** - Complete API documentation with examples for all endpoints
+### Version 2.0.0 (August 2025) - Major Release
+- ✅ **COMPLETE CLIENT PORTAL** - Full client-facing API with project and ticket management
+- ✅ **ADVANCED TICKET SYSTEM** - Clients can create tickets and monitor task progress
+- ✅ **ADMIN DASHBOARD** - Real-time statistics and system insights
+- ✅ **ENHANCED PROJECT MANAGEMENT** - Full CRUD operations with client assignments
+- ✅ **TASK PROGRESS MONITORING** - Clients can see detailed task progress and assignments
+- ✅ **MULTI-ROLE WORKFLOWS** - Complete workflows for admin, staff, and client interactions
+- ✅ **COMPREHENSIVE API** - 15+ new endpoints for complete system management
 
-### Features Added:
-- `POST /admin/projects` - Create new projects with required name and client_id
-- Client validation - Ensures the specified client_id exists and has "client" role
-- Flexible project data - Website and socials fields are optional
-- Consistent response format - Follows established API response patterns
+### Major Features Added:
+
+#### 📈 Admin Dashboard & Analytics
+- `GET /admin/dashboard` - Real-time system statistics
+- `GET /admin/users/clients` - Enhanced client management with project counts
+- Complete system oversight and monitoring capabilities
+
+#### 👤 Client Portal & Communication
+- `GET /client/projects` - Client project visibility
+- `GET /client/projects/{id}` - Detailed project information
+- `POST /client/projects/{id}/tickets` - Ticket creation system
+- `GET /client/tickets` - Comprehensive ticket management
+- `GET /client/tickets/{id}` - Detailed ticket information with tasks
+- `GET /client/projects/{id}/tickets/{id}/tasks` - Complete task progress monitoring
+
+#### 🏗️ Enhanced Project Management
+- `POST /admin/projects` - Project creation with client assignment
+- Advanced project listing with client relations and ticket statistics
+- Complete project lifecycle management
+
+#### 🔄 Workflow Improvements
+- **Admin Workflow**: Complete system management, user creation, project oversight
+- **Staff Workflow**: Task assignment, progress tracking, collaboration tools
+- **Client Workflow**: Project monitoring, ticket creation, progress visibility
+
+#### 🔐 Security & Privacy
+- Role-based access control for all endpoints
+- Client data isolation and ownership verification
+- Privacy controls for sensitive staff information
+- Comprehensive input validation and error handling
+
+#### 📊 Database Optimizations
+- Efficient query design for complex relationships
+- Optimized database functions for better performance
+- Comprehensive error handling and logging
+
+### Technical Improvements:
+- **15+ new API endpoints** for complete system functionality
+- **Advanced database queries** with proper relationship handling
+- **Enhanced security model** with role-based permissions
+- **Comprehensive documentation** with workflow examples
+- **Performance optimizations** for multi-role access patterns
+- **Privacy controls** protecting sensitive information
 
 ---
+
+## 🚀 Roadmap & Future Features
+
+### Planned Enhancements (v2.1.0)
+- 🔔 **Real-time Notifications** - WebSocket integration for live updates
+- 📱 **Mobile Push Notifications** - Flutter integration for task updates
+- 📄 **File Upload System** - Document and asset management for projects
+- 🕒 **Time Tracking** - Task duration tracking and reporting
+- 📊 **Advanced Analytics** - Detailed project performance metrics
+- 💬 **Comment System** - Threaded discussions on tickets and tasks
+- 🔍 **Advanced Search** - Full-text search across projects, tickets, and tasks
+
+### Potential Features (v3.0.0)
+- 📅 **Calendar Integration** - Project timeline and milestone tracking
+- 🎨 **Customizable Dashboards** - Role-specific dashboard layouts
+- 🔗 **Third-party Integrations** - Slack, Teams, GitHub integration
+- 📈 **Client Billing Module** - Time-based billing and invoicing
+- 🌐 **Multi-language Support** - Internationalization for global teams
+- 🎯 **Project Templates** - Predefined project structures and workflows
+
+---
+
+## 🤝 Contributing
+
+This project is part of my portfolio demonstrating full-stack development capabilities. While it's primarily a showcase project, feedback and suggestions are welcome.
+
+### Contact Information
+- **Developer**: Andrea La Torre
+- **Portfolio**: [GitHub Profile](https://github.com/latorreandrea)
+- **Frontend Repository**: [Flutter Mobile App](https://github.com/latorreandrea/auravisual-collab-manager-mobile)
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- **FastAPI** - For the excellent web framework
+- **Supabase** - For the powerful backend-as-a-service platform
+- **Flutter** - For the cross-platform mobile development framework
+- **VS Code** - For the outstanding development environment
+
+---
+
+**Built with ❤️ by Andrea La Torre**
+
+*Demonstrating modern full-stack development with Python, FastAPI, Supabase, and Flutter*
 
