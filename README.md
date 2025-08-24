@@ -1,6 +1,6 @@
 # Auravisual Collab Manager - Backend API
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green) ![Python](https://img.shields.io/badge/python-3.11+-blue)
+![Version](https://img.shields.io/badge/version-2.1.0-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green) ![Python](https://img.shields.io/badge/python-3.11+-blue)
 
 Auravisual Collab Manager is a comprehensive, full-stack project management platform built with **FastAPI**, **Supabase**, and **Flutter**. It is designed to help agencies and teams effectively manage client projects, tasks, communication, and collaboration workflows.
 
@@ -12,10 +12,12 @@ Auravisual Collab Manager is a comprehensive, full-stack project management plat
 - 📊 **RESTful API** with comprehensive endpoints
 - 🏗️ **Complete Project Management** with client assignment and tracking
 - 📋 **Advanced Task Management** with status tracking, priority levels, and assignment
+- 🕒 **Time Tracking System** with start/stop timers and detailed session logs
 - 🎫 **Client Ticket System** for seamless client-team communication
 - 📈 **Admin Dashboard** with real-time statistics and insights
 - 👤 **Client Portal** with project visibility and task progress monitoring
 - 🔄 **Multi-role Workflows** for admin, staff, and client interactions
+- 💰 **Time-based Billing Support** with accurate work duration tracking
 - 🐳 **Docker-ready** for easy deployment
 - 🌐 **CORS Configuration** for cross-origin requests
 - 📱 **Cross-platform** frontend support (Flutter)
@@ -239,9 +241,157 @@ PATCH /tasks/{task_id}/status
 
 ### Phase 5: Client Monitoring
 ```bash
+```
+
+### Phase 5: Client Monitoring
+```bash
 # Client monitors progress
 GET /client/tickets/{ticket_id}
 # Shows tasks, assigned staff, and completion status
+```
+
+---
+
+## ⏱️ Time Tracking System
+
+Il sistema di time tracking di Auravisual permette un monitoraggio accurato del tempo lavorato su ogni task, abilitando funzionalità di billing, reportistica e gestione del workload.
+
+### 🔧 Architettura
+
+Il time tracking utilizza un **approccio JSONB flessibile**:
+- Campo `time_logs` nella tabella `tasks` per memorizzare le sessioni di lavoro
+- Calcolo automatico del tempo totale e conteggio sessioni
+- Supporto per sessioni multiple su ogni task
+- Tracciamento start/stop con timestamp precisi
+
+### 👨‍💼 Workflow per Staff
+
+#### 1. **Avvio Timer**
+```bash
+# Staff inizia a lavorare su una task
+POST /tasks/{task_id}/timer/start
+Authorization: Bearer <staff_token>
+```
+
+**Processo interno:**
+- Sistema verifica permessi (`admin` o `internal_staff`)
+- Controlla che non ci sia già un timer attivo per l'utente
+- Crea nuova sessione con timestamp di inizio
+- Aggiorna task con stato "in progress" se necessario
+
+#### 2. **Interruzione Timer**
+```bash
+# Staff completa la sessione di lavoro
+POST /tasks/{task_id}/timer/stop
+Authorization: Bearer <staff_token>
+```
+
+**Processo interno:**
+- Trova sessione attiva dell'utente per quella task
+- Calcola durata della sessione in minuti
+- Aggiorna i totali: `total_time_minutes` e `time_sessions_count`
+- Chiude la sessione con timestamp di fine
+
+#### 3. **Monitoraggio Tempo**
+```bash
+# Staff visualizza il proprio tempo lavorato
+GET /tasks/my/time-summary
+Authorization: Bearer <staff_token>
+```
+
+### 👑 Workflow per Admin
+
+#### 1. **Monitoraggio Team**
+```bash
+# Admin visualizza tutti i task con tempo tracciato
+GET /admin/tasks
+Authorization: Bearer <admin_token>
+```
+
+#### 2. **Dettagli Specifici**
+```bash
+# Admin esamina le sessioni di una task specifica
+GET /tasks/{task_id}/time-logs
+Authorization: Bearer <admin_token>
+```
+
+#### 3. **Gestione Timer**
+Gli admin possono:
+- Avviare/fermare timer per qualsiasi task
+- Visualizzare sessioni di tutti gli staff members
+- Accedere ai dati aggregati per reporting e billing
+
+### 👤 Visibilità per Client
+
+I client hanno accesso limitato ma informativo:
+- Vedono `total_time_minutes` e `time_sessions_count` tramite i ticket
+- Non accedono ai dettagli delle singole sessioni
+- Possono monitorare il progresso basato sul tempo investito
+
+### 📊 Struttura Dati
+
+#### Task Record con Time Tracking
+```json
+{
+  "id": "task-uuid",
+  "title": "Implement user authentication",
+  "status": "in_progress",
+  "total_time_minutes": 145,
+  "time_sessions_count": 3,
+  "time_logs": [
+    {
+      "session_id": "session-1",
+      "user_id": "staff-uuid",
+      "start_time": "2024-01-15T09:00:00Z",
+      "end_time": "2024-01-15T10:30:00Z",
+      "duration_minutes": 90
+    },
+    {
+      "session_id": "session-2", 
+      "user_id": "staff-uuid",
+      "start_time": "2024-01-15T14:00:00Z",
+      "end_time": "2024-01-15T14:55:00Z",
+      "duration_minutes": 55
+    },
+    {
+      "session_id": "session-3",
+      "user_id": "staff-uuid", 
+      "start_time": "2024-01-15T16:00:00Z",
+      "end_time": null,
+      "duration_minutes": null
+    }
+  ]
+}
+```
+
+### 🚫 Controlli e Validazioni
+
+1. **Sessioni Attive**: Un utente può avere solo una sessione attiva per volta
+2. **Permessi**: Solo `admin` e `internal_staff` possono gestire timer
+3. **Task Assignment**: L'utente deve essere assegnato alla task per tracciare tempo
+4. **Data Integrity**: Controllo automatico di sessioni orfane e cleanup
+
+### 💡 Casi d'Uso Avanzati
+
+#### Reporting Giornaliero
+```bash
+# Staff visualizza il proprio riassunto tempo
+GET /tasks/my/time-summary?date=2024-01-15
+```
+
+#### Billing e Fatturazione
+- Campo `total_time_minutes` utilizzabile per calcoli di billing
+- Tracciamento granulare per tariffe orarie
+- Reportistica dettagliata per progetti client
+
+#### Project Management
+- Stima vs. tempo effettivo per task
+- Identificazione di task time-consuming
+- Ottimizzazione allocazione risorse team
+
+---
+
+## 📋 API Documentation
 ```
 
 ---
@@ -1389,7 +1539,200 @@ curl -X PATCH https://app.auravisual.dk/tasks/TASK_UUID/status \
 
 ---
 
+## ⏱️ Time Tracking API Endpoints
+
+### POST /tasks/{task_id}/timer/start
+**Description:** Start a timer for a specific task  
+**Authentication:** Bearer token (admin or internal_staff)  
+**Permission:** User must be assigned to the task
+
+**Request:**
+```bash
+curl -X POST https://app.auravisual.dk/tasks/TASK_UUID/timer/start \
+  -H "Authorization: Bearer $STAFF_TOKEN"
+```
+
+**Response:**
+```json
+{
+  "message": "Timer started successfully",
+  "task_id": "uuid-task-1",
+  "session_id": "uuid-session-1",
+  "start_time": "2024-01-15T09:00:00Z",
+  "user_id": "uuid-staff-1"
+}
+```
+
+**Error Cases:**
+- `403` - User not assigned to task or insufficient permissions
+- `400` - User already has an active timer for this task
+- `404` - Task not found
+
+---
+
+### POST /tasks/{task_id}/timer/stop
+**Description:** Stop an active timer for a specific task  
+**Authentication:** Bearer token (admin or internal_staff)  
+**Permission:** User must have an active session for this task
+
+**Request:**
+```bash
+curl -X POST https://app.auravisual.dk/tasks/TASK_UUID/timer/stop \
+  -H "Authorization: Bearer $STAFF_TOKEN"
+```
+
+**Response:**
+```json
+{
+  "message": "Timer stopped successfully",
+  "task_id": "uuid-task-1",
+  "session_id": "uuid-session-1",
+  "start_time": "2024-01-15T09:00:00Z",
+  "end_time": "2024-01-15T10:30:00Z",
+  "duration_minutes": 90,
+  "total_time_minutes": 145,
+  "time_sessions_count": 2
+}
+```
+
+**Error Cases:**
+- `404` - No active timer found for this user and task
+- `403` - Insufficient permissions
+
+---
+
+### GET /tasks/{task_id}/time-logs
+**Description:** Get detailed time logs for a specific task  
+**Authentication:** Bearer token (admin or internal_staff)  
+**Permission:** Admin can view all logs, staff can view only their own logs
+
+**Request:**
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" \
+  https://app.auravisual.dk/tasks/TASK_UUID/time-logs
+```
+
+**Response:**
+```json
+{
+  "task_id": "uuid-task-1",
+  "task_title": "Implement user authentication",
+  "total_time_minutes": 145,
+  "time_sessions_count": 3,
+  "time_logs": [
+    {
+      "session_id": "session-1",
+      "user_id": "uuid-staff-1", 
+      "user_name": "John Developer",
+      "start_time": "2024-01-15T09:00:00Z",
+      "end_time": "2024-01-15T10:30:00Z",
+      "duration_minutes": 90
+    },
+    {
+      "session_id": "session-2",
+      "user_id": "uuid-staff-1",
+      "user_name": "John Developer", 
+      "start_time": "2024-01-15T14:00:00Z",
+      "end_time": "2024-01-15T14:55:00Z",
+      "duration_minutes": 55
+    },
+    {
+      "session_id": "session-3",
+      "user_id": "uuid-staff-1",
+      "user_name": "John Developer",
+      "start_time": "2024-01-15T16:00:00Z",
+      "end_time": null,
+      "duration_minutes": null,
+      "status": "active"
+    }
+  ],
+  "active_sessions": 1
+}
+```
+
+---
+
+### GET /tasks/my/time-summary
+**Description:** Get time tracking summary for the current user  
+**Authentication:** Bearer token (admin or internal_staff)  
+**Optional Query Parameters:**
+- `date` - Filter by specific date (YYYY-MM-DD)
+- `project_id` - Filter by project
+- `active_only` - Show only tasks with active timers
+
+**Request:**
+```bash
+curl -H "Authorization: Bearer $STAFF_TOKEN" \
+  "https://app.auravisual.dk/tasks/my/time-summary?date=2024-01-15"
+```
+
+**Response:**
+```json
+{
+  "user_id": "uuid-staff-1",
+  "user_name": "John Developer",
+  "date": "2024-01-15",
+  "total_time_today": 145,
+  "active_timers": 1,
+  "tasks": [
+    {
+      "task_id": "uuid-task-1",
+      "task_title": "Implement user authentication",
+      "project_name": "Company Website",
+      "time_today": 90,
+      "total_time": 145,
+      "sessions_count": 2,
+      "status": "in_progress",
+      "has_active_timer": false
+    },
+    {
+      "task_id": "uuid-task-2", 
+      "task_title": "Fix responsive design",
+      "project_name": "Company Website",
+      "time_today": 55,
+      "total_time": 55,
+      "sessions_count": 1,
+      "status": "in_progress",
+      "has_active_timer": true
+    }
+  ]
+}
+```
+
+### 🔐 Time Tracking Permissions Summary
+
+| Action | Admin | Internal Staff | Client |
+|---|:---:|:---:|:---:|
+| Start/Stop timer | ✅ (any task) | ✅ (assigned tasks) | ❌ |
+| View time logs | ✅ (all logs) | ✅ (own logs) | ❌ |
+| View time summary | ✅ (all users) | ✅ (own summary) | ❌ |
+| See time totals in tasks | ✅ | ✅ | ✅ (via tickets) |
+
+---
+
 ## 🔄 Recent Updates
+
+### Version 2.1.0 (January 2025) - Time Tracking Release
+- ✅ **COMPREHENSIVE TIME TRACKING** - Full time monitoring system for tasks and projects
+- ✅ **SESSION-BASED TIMERS** - Start/stop functionality with detailed session logging
+- ✅ **JSONB STORAGE** - Flexible time log storage with automatic aggregation
+- ✅ **ROLE-BASED TIME ACCESS** - Admin oversight and staff self-monitoring
+- ✅ **BILLING SUPPORT** - Accurate time data for project billing and reporting
+- ✅ **ACTIVE TIMER MANAGEMENT** - Prevent overlapping sessions and ensure data integrity
+
+#### ⏱️ Time Tracking Features:
+- `POST /tasks/{id}/timer/start` - Start timer for task (admin/staff)
+- `POST /tasks/{id}/timer/stop` - Stop timer and calculate duration
+- `GET /tasks/{id}/time-logs` - Detailed session logs and analytics
+- `GET /tasks/my/time-summary` - Personal time tracking dashboard
+- Automatic `total_time_minutes` and `time_sessions_count` calculation
+- Client visibility of time investment through existing ticket endpoints
+
+#### 🔧 Technical Improvements:
+- Enhanced database schema with `time_logs` JSONB column
+- Robust session management with validation and cleanup
+- Integration with existing task assignment and permission systems
+- Support for multi-user time tracking on shared tasks
 
 ### Version 2.0.0 (August 2025) - Major Release
 - ✅ **COMPLETE CLIENT PORTAL** - Full client-facing API with project and ticket management
@@ -1398,7 +1741,7 @@ curl -X PATCH https://app.auravisual.dk/tasks/TASK_UUID/status \
 - ✅ **ENHANCED PROJECT MANAGEMENT** - Full CRUD operations with client assignments
 - ✅ **TASK PROGRESS MONITORING** - Clients can see detailed task progress and assignments
 - ✅ **MULTI-ROLE WORKFLOWS** - Complete workflows for admin, staff, and client interactions
-- ✅ **COMPREHENSIVE API** - 15+ new endpoints for complete system management
+- ✅ **COMPREHENSIVE API** - 20+ endpoints for complete system management
 
 ### Major Features Added:
 
@@ -1437,7 +1780,7 @@ curl -X PATCH https://app.auravisual.dk/tasks/TASK_UUID/status \
 - Comprehensive error handling and logging
 
 ### Technical Improvements:
-- **15+ new API endpoints** for complete system functionality
+- **20+ API endpoints** for complete system functionality
 - **Advanced database queries** with proper relationship handling
 - **Enhanced security model** with role-based permissions
 - **Comprehensive documentation** with workflow examples

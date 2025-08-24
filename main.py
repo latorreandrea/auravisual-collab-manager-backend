@@ -15,7 +15,7 @@ from database import (
     get_all_projects_with_relations, get_project_with_relations,
     create_tasks_bulk, create_project, get_users_by_role_with_projects,
     get_dashboard_stats, get_client_projects, create_ticket, get_client_tickets,
-    get_client_ticket_with_tasks
+    get_client_ticket_with_tasks, start_task_timer, stop_task_timer, get_task_time_logs
 )
 
 # Initialize FastAPI app with centralized configuration
@@ -965,6 +965,197 @@ async def client_get_ticket_tasks(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching tasks: {str(e)}")
 
+
+# TIME TRACKING API
+@app.post("/tasks/{task_id}/timer/start")
+async def start_task_timer_endpoint(
+    task_id: str,
+    timer_data: dict,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Start timer for a task (assigned user or admin)"""
+    try:
+        user_id = current_user.get("id")
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not found")
+        
+        result = await start_task_timer(task_id, user_id)
+        
+        if "error" in result:
+            if result["error"] == "Permission denied":
+                raise HTTPException(status_code=403, detail=result["error"])
+            elif result["error"] == "Task not found":
+                raise HTTPException(status_code=404, detail=result["error"])
+            elif "already running" in result["error"]:
+                raise HTTPException(status_code=400, detail=result["error"])
+            else:
+                raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "message": "Timer started successfully",
+            "task_id": task_id,
+            "session": result.get("session"),
+            "started_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error starting timer: {str(e)}")
+
+@app.post("/tasks/{task_id}/timer/stop")
+async def stop_task_timer_endpoint(
+    task_id: str,
+    timer_data: dict,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Stop timer for a task (assigned user or admin)"""
+    try:
+        user_id = current_user.get("id")
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not found")
+        
+        result = await stop_task_timer(task_id, user_id)
+        
+        if "error" in result:
+            if result["error"] == "Permission denied":
+                raise HTTPException(status_code=403, detail=result["error"])
+            elif result["error"] == "Task not found":
+                raise HTTPException(status_code=404, detail=result["error"])
+            elif "No active timer" in result["error"]:
+                raise HTTPException(status_code=400, detail=result["error"])
+            else:
+                raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "message": "Timer stopped successfully",
+            "task_id": task_id,
+            "session": result.get("session"),
+            "total_time_minutes": result.get("total_time_minutes"),
+            "sessions_count": result.get("sessions_count"),
+            "stopped_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error stopping timer: {str(e)}")
+
+@app.get("/tasks/{task_id}/time-logs")
+async def get_task_time_logs_endpoint(
+    task_id: str,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Get time logs for a task (assigned user, staff, or admin)"""
+    try:
+        user_id = current_user.get("id")
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not found")
+        
+        result = await get_task_time_logs(task_id, user_id)
+        
+        if "error" in result:
+            if result["error"] == "Permission denied":
+                raise HTTPException(status_code=403, detail=result["error"])
+            elif result["error"] == "Task not found":
+                raise HTTPException(status_code=404, detail=result["error"])
+            else:
+                raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "task": result,
+            "requested_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching time logs: {str(e)}")
+
+@app.get("/tasks/my/time-summary")
+async def get_my_time_summary(current_user: Dict = Depends(get_current_user)):
+    """Get time tracking summary for current user's tasks"""
+    try:
+        user_id = current_user.get("id")
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not found")
+        
+        admin_client = get_supabase_admin_client()
+        
+        # Get all tasks assigned to user with time data
+        tasks_response = admin_client.from_("tasks").select("""
+            id,
+            action,
+            status,
+            priority,
+            time_logs,
+            total_time_minutes,
+            time_sessions_count,
+            created_at,
+            tickets:ticket_id (
+                id,
+                message,
+                projects:project_id (
+                    id,
+                    name
+                )
+            )
+        """).eq("assigned_to", user_id).order("created_at", desc=True).execute()
+        
+        tasks = tasks_response.data if tasks_response.data else []
+        
+        # Calculate summary statistics
+        total_time_minutes = sum(task.get("total_time_minutes", 0) for task in tasks)
+        total_sessions = sum(task.get("time_sessions_count", 0) for task in tasks)
+        active_timers = sum(1 for task in tasks if any(not log.get("end_time") for log in task.get("time_logs", [])))
+        
+        # Format tasks
+        formatted_tasks = []
+        for task in tasks:
+            ticket_info = task.get("tickets") or {}
+            project_info = ticket_info.get("projects") or {} if ticket_info else {}
+            
+            # Check for active timer
+            time_logs = task.get("time_logs") or []
+            active_session = next((log for log in time_logs if not log.get("end_time")), None)
+            
+            formatted_task = {
+                "id": task.get("id"),
+                "action": task.get("action"),
+                "status": task.get("status"),
+                "priority": task.get("priority"),
+                "project_name": project_info.get("name") or "Unknown Project",
+                "ticket_message": ticket_info.get("message") or "No ticket info",
+                "time_summary": {
+                    "total_minutes": task.get("total_time_minutes", 0),
+                    "total_hours": round(task.get("total_time_minutes", 0) / 60, 2),
+                    "sessions_count": task.get("time_sessions_count", 0),
+                    "is_timer_running": active_session is not None,
+                    "current_session_start": active_session.get("start_time") if active_session else None
+                },
+                "created_at": task.get("created_at")
+            }
+            formatted_tasks.append(formatted_task)
+        
+        return {
+            "summary": {
+                "total_time_minutes": total_time_minutes,
+                "total_time_hours": round(total_time_minutes / 60, 2),
+                "total_sessions": total_sessions,
+                "active_timers": active_timers,
+                "tasks_count": len(tasks)
+            },
+            "tasks": formatted_tasks,
+            "user_id": user_id,
+            "requested_by": current_user.get("username")
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching time summary: {str(e)}")
 
 # Debug endpoints (only in development and with admin access)
 if settings.debug:

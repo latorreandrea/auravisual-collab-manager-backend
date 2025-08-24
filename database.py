@@ -728,6 +728,187 @@ async def get_client_ticket_with_tasks(client_id: str, ticket_id: str) -> Option
         logger.error(f"Error fetching ticket {ticket_id} for client {client_id}: {str(e)}")
         return None
 
+# TASK MANAGEMENT
+
+async def start_task_timer(task_id: str, user_id: str) -> Dict:
+    """Start a timer for a task (staff only)"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Verify task exists and user has permission
+        task_check = admin_client.from_("tasks").select("assigned_to, time_logs").eq("id", task_id).single().execute()
+        
+        if not task_check.data:
+            return {"error": "Task not found"}
+        
+        # Check if user is assigned to this task or is admin
+        user_role_check = admin_client.from_("users").select("role").eq("id", user_id).single().execute()
+        user_role = user_role_check.data.get("role") if user_role_check.data else None
+        
+        if task_check.data["assigned_to"] != user_id and user_role != "admin":
+            return {"error": "Permission denied"}
+        
+        # Check if there's already an active session (no end_time)
+        time_logs = task_check.data.get("time_logs") or []
+        active_session = next((log for log in time_logs if not log.get("end_time")), None)
+        
+        if active_session:
+            return {"error": "Task timer is already running"}
+        
+        # Add new session start
+        from datetime import datetime
+        start_time = datetime.utcnow().isoformat()
+        
+        new_session = {
+            "start_time": start_time,
+            "started_by": user_id
+        }
+        
+        time_logs.append(new_session)
+        
+        # Update task
+        response = admin_client.from_("tasks").update({
+            "time_logs": time_logs,
+            "status": "in_progress"  # Auto-start task when timer starts
+        }).eq("id", task_id).execute()
+        
+        if response.data:
+            logger.info(f"Timer started for task {task_id} by user {user_id}")
+            return {"session": new_session, "task_id": task_id}
+        else:
+            return {"error": "Failed to start timer"}
+            
+    except Exception as e:
+        logger.error(f"Error starting task timer: {str(e)}")
+        return {"error": str(e)}
+
+
+async def stop_task_timer(task_id: str, user_id: str) -> Dict:
+    """Stop a timer for a task (staff only)"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Verify task exists and user has permission
+        task_check = admin_client.from_("tasks").select("assigned_to, time_logs").eq("id", task_id).single().execute()
+        
+        if not task_check.data:
+            return {"error": "Task not found"}
+        
+        # Check permission
+        user_role_check = admin_client.from_("users").select("role").eq("id", user_id).single().execute()
+        user_role = user_role_check.data.get("role") if user_role_check.data else None
+        
+        if task_check.data["assigned_to"] != user_id and user_role != "admin":
+            return {"error": "Permission denied"}
+        
+        # Find active session
+        time_logs = task_check.data.get("time_logs") or []
+        active_session_index = next(
+            (i for i, log in enumerate(time_logs) if not log.get("end_time")), 
+            None
+        )
+        
+        if active_session_index is None:
+            return {"error": "No active timer found"}
+        
+        # Complete the session
+        from datetime import datetime
+        end_time = datetime.utcnow().isoformat()
+        start_time = time_logs[active_session_index]["start_time"]
+        
+        # Calculate duration
+        from datetime import datetime
+        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+        duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
+        
+        # Update session
+        time_logs[active_session_index].update({
+            "end_time": end_time,
+            "duration_minutes": duration_minutes,
+            "completed_by": user_id
+        })
+        
+        # Calculate totals
+        total_minutes = sum(log.get("duration_minutes", 0) for log in time_logs if log.get("duration_minutes"))
+        sessions_count = len([log for log in time_logs if log.get("end_time")])
+        
+        # Update task
+        response = admin_client.from_("tasks").update({
+            "time_logs": time_logs,
+            "total_time_minutes": total_minutes,
+            "time_sessions_count": sessions_count
+        }).eq("id", task_id).execute()
+        
+        if response.data:
+            logger.info(f"Timer stopped for task {task_id} by user {user_id}. Duration: {duration_minutes} minutes")
+            return {
+                "session": time_logs[active_session_index],
+                "task_id": task_id,
+                "total_time_minutes": total_minutes,
+                "sessions_count": sessions_count
+            }
+        else:
+            return {"error": "Failed to stop timer"}
+            
+    except Exception as e:
+        logger.error(f"Error stopping task timer: {str(e)}")
+        return {"error": str(e)}
+
+async def get_task_time_logs(task_id: str, user_id: str) -> Dict:
+    """Get time logs for a task (staff/admin only)"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Get task with time logs
+        task_response = admin_client.from_("tasks").select("""
+            id,
+            action,
+            assigned_to,
+            status,
+            time_logs,
+            total_time_minutes,
+            time_sessions_count,
+            users:assigned_to (
+                full_name,
+                username
+            )
+        """).eq("id", task_id).single().execute()
+        
+        if not task_response.data:
+            return {"error": "Task not found"}
+        
+        task = task_response.data
+        
+        # Check permission
+        user_role_check = admin_client.from_("users").select("role").eq("id", user_id).single().execute()
+        user_role = user_role_check.data.get("role") if user_role_check.data else None
+        
+        if task["assigned_to"] != user_id and user_role not in ["admin", "internal_staff"]:
+            return {"error": "Permission denied"}
+        
+        time_logs = task.get("time_logs") or []
+        
+        # Check for active session
+        active_session = next((log for log in time_logs if not log.get("end_time")), None)
+        
+        return {
+            "task_id": task_id,
+            "task_action": task.get("action"),
+            "assigned_to": task.get("users", {}),
+            "time_logs": time_logs,
+            "active_session": active_session,
+            "summary": {
+                "total_time_minutes": task.get("total_time_minutes", 0),
+                "total_time_hours": round(task.get("total_time_minutes", 0) / 60, 2),
+                "sessions_count": task.get("time_sessions_count", 0),
+                "is_timer_running": active_session is not None
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting task time logs: {str(e)}")
+        return {"error": str(e)}
 
 # Database dependencies for FastAPI
 def get_db() -> Client:
