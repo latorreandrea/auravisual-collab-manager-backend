@@ -27,7 +27,7 @@ app.add_middleware(CORSMiddleware, **get_cors_config())
 
 # MAIN VARIABLES SETTINGS:
 
-OPEN_TICKET_STATUSES = {"to_read", "processing"}
+OPEN_TICKET_STATUSES = {"to_read", "accepted"}
 ACTIVE_TASK_STATUS = "in_progress"
 
 
@@ -508,7 +508,7 @@ async def admin_create_tasks_for_ticket(
     """
     Create multiple tasks for a ticket (admin only).
     Request body: {"tasks": [{"action": "...", "assigned_to": "...", "priority": "medium"}, ...]}
-    Ticket will be moved to 'processing'.
+    Ticket will be moved to 'accepted' status.
     """
     tasks = payload.get("tasks")
     if not tasks or not isinstance(tasks, list):
@@ -520,7 +520,7 @@ async def admin_create_tasks_for_ticket(
         raise HTTPException(status_code=400, detail=result["error"])
 
     return {
-        "message": "Tasks created and ticket moved to 'processing'",
+        "message": "Tasks created and ticket moved to 'accepted'",
         "created_tasks_count": len(result.get("tasks", [])),
         "created_tasks": result.get("tasks", []),
         "ticket_id": ticket_id,

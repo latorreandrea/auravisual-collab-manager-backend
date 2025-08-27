@@ -124,11 +124,12 @@ docker run -p 8000:8000 --env-file .env auravisual-backend
    - Access comprehensive project analytics
 
 3. **Task & Ticket Management**
-   - View all tickets from clients
+   - View all tickets from clients (status: `to_read`)
    - Create individual tasks via `POST /admin/tasks`
    - Create bulk tasks for tickets via `POST /admin/tickets/{id}/tasks`
+   - When tasks are created, ticket status automatically changes to `accepted`
    - Monitor task assignments and completion rates
-   - Update ticket status as work progresses
+   - Reject tickets if needed (status: `rejected`)
 
 4. **Dashboard & Analytics**
    - Access real-time statistics via `GET /admin/dashboard`
@@ -165,9 +166,11 @@ docker run -p 8000:8000 --env-file .env auravisual-backend
 
 2. **Communication via Tickets**
    - Create tickets for project requests via `POST /client/projects/{id}/tickets`
+   - New tickets start with status `to_read`
    - Submit feedback, change requests, and bug reports
    - View all their tickets across projects via `GET /client/tickets`
    - Filter tickets by specific projects
+   - Monitor ticket status: `to_read` → `accepted` (when admin creates tasks) or `rejected`
 
 3. **Progress Monitoring**
    - View detailed ticket information via `GET /client/tickets/{id}`
@@ -228,6 +231,7 @@ POST /admin/tickets/{ticket_id}/tasks
     }
   ]
 }
+# Ticket status automatically changes from "to_read" to "accepted"
 ```
 
 ### Phase 4: Development (Staff)
@@ -970,8 +974,7 @@ This section documents the project/ticket/task endpoints that support the core c
 
 ### Ticket statuses
 - `to_read` - New ticket, not yet reviewed by staff/admin
-- `processing` - Ticket currently being processed (tasks have been created)
-- `accepted` - Ticket request accepted / approved
+- `accepted` - Ticket request accepted and tasks have been created
 - `rejected` - Ticket request rejected
 
 ### Task statuses
@@ -1269,7 +1272,7 @@ Response:
     {
       "id": "uuid-ticket-1",
       "message": "Change header color to brand green",
-      "status": "processing",
+      "status": "accepted",
       "project": {
         "id": "uuid-project-1",
         "name": "Website E-commerce",
@@ -1327,7 +1330,7 @@ Response:
   "ticket": {
     "id": "uuid-ticket-1",
     "message": "Change header color to brand green",
-    "status": "processing",
+    "status": "accepted",
     "project": {
       "id": "uuid-project-1",
       "name": "Website E-commerce",
@@ -1380,7 +1383,7 @@ Response:
   "ticket": {
     "id": "uuid-ticket-1",
     "message": "Change header color to brand green",
-    "status": "processing"
+    "status": "accepted"
   },
   "project_id": "uuid-project-1",
   "tasks": [
@@ -1446,7 +1449,7 @@ curl -X POST https://app.auravisual.dk/admin/tasks \
 ---
 
 ### POST /admin/tickets/{ticket_id}/tasks (bulk create)
-Description: Admin creates multiple tasks for a ticket in a single request. Each task must include `action` and `assigned_to`. `priority` is optional. After tasks are created the ticket's status is updated to `processing`.
+Description: Admin creates multiple tasks for a ticket in a single request. Each task must include `action` and `assigned_to`. `priority` is optional. After tasks are created the ticket's status is updated to `accepted`.
 Authentication: Bearer token (admin)
 
 Request body:
@@ -1464,11 +1467,11 @@ Response (trimmed):
 
 ```json
 {
-  "message": "Tasks created and ticket moved to 'processing'",
+  "message": "Tasks created and ticket moved to 'accepted'",
   "created_tasks_count": 2,
   "created_tasks": [ {"id": "uuid-task-1", "action": "..."}, {"id": "uuid-task-2"} ],
   "ticket_id": "uuid-ticket-1",
-  "ticket_status": "processing"
+  "ticket_status": "accepted"
 }
 ```
 
@@ -1733,6 +1736,12 @@ curl -H "Authorization: Bearer $STAFF_TOKEN" \
 - Robust session management with validation and cleanup
 - Integration with existing task assignment and permission systems
 - Support for multi-user time tracking on shared tasks
+
+#### 🔄 Workflow Improvements:
+- **Simplified Ticket Status Flow**: `to_read` → `accepted` (when tasks created) or `rejected`
+- **Automatic Status Updates**: Ticket status changes to `accepted` when admin creates tasks
+- **Clearer Client Communication**: Clients see clear "accepted" status instead of "processing"
+- **Improved Admin Workflow**: Direct task creation moves tickets to accepted state
 
 ### Version 2.0.0 (August 2025) - Major Release
 - ✅ **COMPLETE CLIENT PORTAL** - Full client-facing API with project and ticket management

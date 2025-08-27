@@ -304,7 +304,7 @@ async def create_task(ticket_id: str, assigned_to: str, action: str, priority: s
 
 
 async def create_tasks_bulk(ticket_id: str, tasks: List[Dict]) -> Dict:
-    """Create multiple tasks for a ticket (admin only). Also set ticket status to 'processing'"""
+    """Create multiple tasks for a ticket (admin only). Also set ticket status to 'accepted'"""
     try:
         admin_client = get_supabase_admin_client()
         # Verify ticket exists
@@ -345,10 +345,10 @@ async def create_tasks_bulk(ticket_id: str, tasks: List[Dict]) -> Dict:
         response = admin_client.from_("tasks").insert(insert_payload).execute()
         created = response.data if response.data else []
 
-        # Update ticket status to processing
-        admin_client.from_("tickets").update({"status": "processing"}).eq("id", ticket_id).execute()
+        # Update ticket status to accepted
+        admin_client.from_("tickets").update({"status": "accepted"}).eq("id", ticket_id).execute()
 
-        return {"tasks": created, "ticket_id": ticket_id, "ticket_status": "processing"}
+        return {"tasks": created, "ticket_id": ticket_id, "ticket_status": "accepted"}
 
     except Exception as e:
         logger.error(f"Error creating tasks bulk for ticket {ticket_id}: {str(e)}")
