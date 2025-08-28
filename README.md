@@ -1898,7 +1898,7 @@ curl -H "Authorization: Bearer $STAFF_TOKEN" \
 This project is part of my portfolio demonstrating full-stack development capabilities. While it's primarily a showcase project, feedback and suggestions are welcome.
 
 ### Contact Information
-- **Developer**: Andrea La Torre
+- **Developer**: Andrea Latorre
 - **Portfolio**: [GitHub Profile](https://github.com/latorreandrea)
 - **Frontend Repository**: [Flutter Mobile App](https://github.com/latorreandrea/auravisual-collab-manager-mobile)
 
