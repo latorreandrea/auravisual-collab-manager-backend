@@ -179,6 +179,12 @@ docker run -p 8000:8000 --env-file .env auravisual-backend
    - Track task completion status and priority levels
    - Access task details via `GET /client/projects/{id}/tickets/{id}/tasks`
 
+4. **Real-time Work Visibility**
+   - View active timers for their projects via `GET /client/active-timers`
+   - See who is currently working on their tasks
+   - Monitor real-time work progress and team allocation
+   - Get transparency into current development activities
+
 ---
 
 ## 🎯 Typical Project Lifecycle
@@ -258,83 +264,83 @@ GET /client/tickets/{ticket_id}
 
 ## ⏱️ Time Tracking System
 
-Il sistema di time tracking di Auravisual permette un monitoraggio accurato del tempo lavorato su ogni task, abilitando funzionalità di billing, reportistica e gestione del workload.
+The Auravisual time tracking system enables accurate monitoring of time worked on each task, providing billing, reporting, and workload management capabilities.
 
-### 🔧 Architettura
+### 🔧 Architecture
 
-Il time tracking utilizza un **approccio JSONB flessibile**:
-- Campo `time_logs` nella tabella `tasks` per memorizzare le sessioni di lavoro
-- Calcolo automatico del tempo totale e conteggio sessioni
-- Supporto per sessioni multiple su ogni task
-- Tracciamento start/stop con timestamp precisi
+Time tracking uses a **flexible JSONB approach**:
+- `time_logs` field in the `tasks` table to store work sessions
+- Automatic calculation of total time and session count
+- Support for multiple sessions per task
+- Precise start/stop tracking with timestamps
 
-### 👨‍💼 Workflow per Staff
+### 👨‍💼 Staff Workflow
 
-#### 1. **Avvio Timer**
+#### 1. **Start Timer**
 ```bash
-# Staff inizia a lavorare su una task
+# Staff starts working on a task
 POST /tasks/{task_id}/timer/start
 Authorization: Bearer <staff_token>
 ```
 
-**Processo interno:**
-- Sistema verifica permessi (`admin` o `internal_staff`)
-- Controlla che non ci sia già un timer attivo per l'utente
-- Crea nuova sessione con timestamp di inizio
-- Aggiorna task con stato "in progress" se necessario
+**Internal Process:**
+- System verifies permissions (`admin` or `internal_staff`)
+- Checks that user doesn't already have an active timer
+- Creates new session with start timestamp
+- Updates task status to "in progress" if necessary
 
-#### 2. **Interruzione Timer**
+#### 2. **Stop Timer**
 ```bash
-# Staff completa la sessione di lavoro
+# Staff completes work session
 POST /tasks/{task_id}/timer/stop
 Authorization: Bearer <staff_token>
 ```
 
-**Processo interno:**
-- Trova sessione attiva dell'utente per quella task
-- Calcola durata della sessione in minuti
-- Aggiorna i totali: `total_time_minutes` e `time_sessions_count`
-- Chiude la sessione con timestamp di fine
+**Internal Process:**
+- Finds user's active session for that task
+- Calculates session duration in minutes
+- Updates totals: `total_time_minutes` and `time_sessions_count`
+- Closes session with end timestamp
 
-#### 3. **Monitoraggio Tempo**
+#### 3. **Time Monitoring**
 ```bash
-# Staff visualizza il proprio tempo lavorato
+# Staff views their worked time
 GET /tasks/my/time-summary
 Authorization: Bearer <staff_token>
 ```
 
-### 👑 Workflow per Admin
+### 👑 Admin Workflow
 
-#### 1. **Monitoraggio Team**
+#### 1. **Team Monitoring**
 ```bash
-# Admin visualizza tutti i task con tempo tracciato
+# Admin views all tasks with tracked time
 GET /admin/tasks
 Authorization: Bearer <admin_token>
 ```
 
-#### 2. **Dettagli Specifici**
+#### 2. **Specific Details**
 ```bash
-# Admin esamina le sessioni di una task specifica
+# Admin examines sessions for a specific task
 GET /tasks/{task_id}/time-logs
 Authorization: Bearer <admin_token>
 ```
 
-#### 3. **Gestione Timer**
-Gli admin possono:
-- Avviare/fermare timer per qualsiasi task
-- Visualizzare sessioni di tutti gli staff members
-- Accedere ai dati aggregati per reporting e billing
+#### 3. **Timer Management**
+Admins can:
+- Start/stop timers for any task
+- View sessions from all staff members
+- Access aggregated data for reporting and billing
 
-### 👤 Visibilità per Client
+### 👤 Client Visibility
 
-I client hanno accesso limitato ma informativo:
-- Vedono `total_time_minutes` e `time_sessions_count` tramite i ticket
-- Non accedono ai dettagli delle singole sessioni
-- Possono monitorare il progresso basato sul tempo investito
+Clients have limited but informative access:
+- See `total_time_minutes` and `time_sessions_count` through tickets
+- No access to individual session details
+- Can monitor progress based on time invested
 
-### 📊 Struttura Dati
+### 📊 Data Structure
 
-#### Task Record con Time Tracking
+#### Task Record with Time Tracking
 ```json
 {
   "id": "task-uuid",
@@ -368,30 +374,30 @@ I client hanno accesso limitato ma informativo:
 }
 ```
 
-### 🚫 Controlli e Validazioni
+### 🚫 Controls and Validations
 
-1. **Sessioni Attive**: Un utente può avere solo una sessione attiva per volta
-2. **Permessi**: Solo `admin` e `internal_staff` possono gestire timer
-3. **Task Assignment**: L'utente deve essere assegnato alla task per tracciare tempo
-4. **Data Integrity**: Controllo automatico di sessioni orfane e cleanup
+1. **Active Sessions**: A user can only have one active session at a time
+2. **Permissions**: Only `admin` and `internal_staff` can manage timers
+3. **Task Assignment**: User must be assigned to task to track time
+4. **Data Integrity**: Automatic control of orphaned sessions and cleanup
 
-### 💡 Casi d'Uso Avanzati
+### 💡 Advanced Use Cases
 
-#### Reporting Giornaliero
+#### Daily Reporting
 ```bash
-# Staff visualizza il proprio riassunto tempo
+# Staff views their time summary
 GET /tasks/my/time-summary?date=2024-01-15
 ```
 
-#### Billing e Fatturazione
-- Campo `total_time_minutes` utilizzabile per calcoli di billing
-- Tracciamento granulare per tariffe orarie
-- Reportistica dettagliata per progetti client
+#### Billing and Invoicing
+- `total_time_minutes` field usable for billing calculations
+- Granular tracking for hourly rates
+- Detailed reporting for client projects
 
 #### Project Management
-- Stima vs. tempo effettivo per task
-- Identificazione di task time-consuming
-- Ottimizzazione allocazione risorse team
+- Estimate vs. actual time for tasks
+- Identification of time-consuming tasks
+- Team resource allocation optimization
 
 ---
 
@@ -1420,6 +1426,72 @@ curl -H "Authorization: Bearer $CLIENT_TOKEN" \
 
 ---
 
+### GET /client/active-timers
+**Description:** Get all active timers for tasks in client's projects  
+**Authentication:** Bearer token (client only)
+
+**Response:**
+```json
+{
+  "message": "Active timers retrieved successfully",
+  "client_id": "uuid-client-1",
+  "active_timers": [
+    {
+      "task_id": "uuid-task-1",
+      "task_action": "Update header CSS with new brand colors",
+      "start_time": "2025-08-28T14:30:00Z",
+      "session_id": "uuid-session-1",
+      "user_id": "uuid-staff-1",
+      "user_name": "John Developer",
+      "user_username": "john.dev",
+      "project": {
+        "id": "uuid-project-1",
+        "name": "Company Website Redesign"
+      },
+      "ticket": {
+        "id": "uuid-ticket-1",
+        "message": "Please update header colors to match brand"
+      }
+    },
+    {
+      "task_id": "uuid-task-2", 
+      "task_action": "Test responsive design on mobile devices",
+      "start_time": "2025-08-28T15:45:00Z",
+      "session_id": "uuid-session-2",
+      "user_id": "uuid-staff-2",
+      "user_name": "Sarah Tester",
+      "user_username": "sarah.test",
+      "project": {
+        "id": "uuid-project-1",
+        "name": "Company Website Redesign"
+      },
+      "ticket": {
+        "id": "uuid-ticket-2",
+        "message": "Mobile layout needs optimization"
+      }
+    }
+  ],
+  "total_active_timers": 2,
+  "projects_checked": 1,
+  "timestamp": "2025-08-28T16:00:00Z",
+  "requested_by": "client_username"
+}
+```
+
+**Example curl:**
+```bash
+curl -H "Authorization: Bearer $CLIENT_TOKEN" \
+  https://app.auravisual.dk/client/active-timers
+```
+
+**Use Cases:**
+- **Real-time Work Monitoring**: Clients can see who is actively working on their projects
+- **Transparency**: Clear visibility into current work progress and team allocation
+- **Communication**: Helps clients know when team members are available for questions
+- **Project Status**: Immediate insight into active development work
+
+---
+
 ### POST /admin/tasks
 Description: Admin creates a single task.
 Authentication: Bearer token (admin)
@@ -1539,6 +1611,7 @@ curl -X PATCH https://app.auravisual.dk/tasks/TASK_UUID/status \
 | Create tasks | ✅ | ❌ | ❌ |
 | Read assigned tasks | ✅ | ✅ | ✅ (own only) |
 | Update task status | ✅ | ✅ (if assigned) | ❌ |
+| View active timers | ✅ | ✅ | ✅ (own projects) |
 
 ---
 
@@ -1710,6 +1783,7 @@ curl -H "Authorization: Bearer $STAFF_TOKEN" \
 | View time logs | ✅ (all logs) | ✅ (own logs) | ❌ |
 | View time summary | ✅ (all users) | ✅ (own summary) | ❌ |
 | See time totals in tasks | ✅ | ✅ | ✅ (via tickets) |
+| View active timers | ✅ (all projects) | ✅ (assigned tasks) | ✅ (own projects) |
 
 ---
 

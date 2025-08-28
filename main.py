@@ -15,7 +15,8 @@ from database import (
     get_all_projects_with_relations, get_project_with_relations,
     create_tasks_bulk, create_project, get_users_by_role_with_projects,
     get_dashboard_stats, get_client_projects, create_ticket, get_client_tickets,
-    get_client_ticket_with_tasks, start_task_timer, stop_task_timer, get_task_time_logs
+    get_client_ticket_with_tasks, start_task_timer, stop_task_timer, get_task_time_logs,
+    get_client_active_timers
 )
 
 # Initialize FastAPI app with centralized configuration
@@ -964,6 +965,39 @@ async def client_get_ticket_tasks(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching tasks: {str(e)}")
+
+
+@app.get("/client/active-timers")
+async def get_client_active_timers_endpoint(
+    current_user: Dict = Depends(get_current_user)
+):
+    """Get active timers for tasks in client's projects (client only)"""
+    user_role = current_user.get("role")
+    if user_role != "client":
+        raise HTTPException(status_code=403, detail="Only clients can access this endpoint")
+    
+    client_id = current_user.get("id")
+    
+    try:
+        result = await get_client_active_timers(client_id)
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=f"Error fetching active timers: {result['error']}")
+        
+        return {
+            "message": "Active timers retrieved successfully",
+            "client_id": client_id,
+            "active_timers": result.get("active_timers", []),
+            "total_active_timers": result.get("total_active_timers", 0),
+            "projects_checked": result.get("projects_checked", 0),
+            "timestamp": result.get("timestamp"),
+            "requested_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching active timers: {str(e)}")
 
 
 # TIME TRACKING API

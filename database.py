@@ -910,6 +910,110 @@ async def get_task_time_logs(task_id: str, user_id: str) -> Dict:
         logger.error(f"Error getting task time logs: {str(e)}")
         return {"error": str(e)}
 
+
+async def get_client_active_timers(client_id: str) -> Dict:
+    """Get all active timers for tasks in client's projects"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Get all projects for this client
+        projects_response = admin_client.from_("projects").select("id").eq("client_id", client_id).execute()
+        
+        if not projects_response.data:
+            return {
+                "client_id": client_id,
+                "active_timers": [],
+                "total_active_timers": 0
+            }
+        
+        project_ids = [project["id"] for project in projects_response.data]
+        
+        # Get all tickets for client's projects
+        tickets_response = admin_client.from_("tickets").select("id").in_("project_id", project_ids).execute()
+        
+        if not tickets_response.data:
+            return {
+                "client_id": client_id,
+                "active_timers": [],
+                "total_active_timers": 0
+            }
+        
+        ticket_ids = [ticket["id"] for ticket in tickets_response.data]
+        
+        # Get all tasks for these tickets with time logs
+        tasks_response = admin_client.from_("tasks").select("""
+            id,
+            action,
+            time_logs,
+            assigned_to,
+            users:assigned_to (
+                full_name,
+                username
+            ),
+            tickets!inner (
+                id,
+                message,
+                projects!inner (
+                    id,
+                    name
+                )
+            )
+        """).in_("ticket_id", ticket_ids).execute()
+        
+        if not tasks_response.data:
+            return {
+                "client_id": client_id,
+                "active_timers": [],
+                "total_active_timers": 0
+            }
+        
+        active_timers = []
+        
+        # Check each task for active timers
+        for task in tasks_response.data:
+            time_logs = task.get("time_logs", [])
+            if not time_logs:
+                continue
+            
+            # Find active session (end_time is null)
+            for session in time_logs:
+                if session.get("end_time") is None and session.get("start_time"):
+                    user_info = task.get("users") or {}
+                    ticket_info = task.get("tickets") or {}
+                    project_info = ticket_info.get("projects") or {}
+                    
+                    active_timers.append({
+                        "task_id": task.get("id"),
+                        "task_action": task.get("action"),
+                        "start_time": session.get("start_time"),
+                        "session_id": session.get("session_id"),
+                        "user_id": session.get("user_id"),
+                        "user_name": user_info.get("full_name") or user_info.get("username") or "Staff Member",
+                        "user_username": user_info.get("username"),
+                        "project": {
+                            "id": project_info.get("id"),
+                            "name": project_info.get("name")
+                        },
+                        "ticket": {
+                            "id": ticket_info.get("id"),
+                            "message": ticket_info.get("message")
+                        }
+                    })
+                    break  # Only one active session per task
+        
+        return {
+            "client_id": client_id,
+            "active_timers": active_timers,
+            "total_active_timers": len(active_timers),
+            "projects_checked": len(project_ids),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting client active timers: {str(e)}")
+        return {"error": str(e)}
+
+
 # Database dependencies for FastAPI
 def get_db() -> Client:
     """Dependency to inject database client into FastAPI endpoints"""
