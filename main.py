@@ -16,7 +16,7 @@ from database import (
     create_tasks_bulk, create_project, get_users_by_role_with_projects,
     get_dashboard_stats, get_client_projects, create_ticket, get_client_tickets,
     get_client_ticket_with_tasks, start_task_timer, stop_task_timer, get_task_time_logs,
-    get_client_active_timers
+    get_client_active_timers, pause_task_timer, resume_task_timer
 )
 
 # Initialize FastAPI app with centralized configuration
@@ -1190,6 +1190,88 @@ async def get_my_time_summary(current_user: Dict = Depends(get_current_user)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching time summary: {str(e)}")
+
+
+@app.post("/tasks/{task_id}/timer/pause")
+async def pause_task_timer_endpoint(
+    task_id: str,
+    timer_data: dict,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Pause timer for a task (can be resumed later)"""
+    try:
+        user_id = current_user.get("id")
+        note = timer_data.get("note", "")
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not found")
+        
+        result = await pause_task_timer(task_id, user_id, note)
+        
+        if "error" in result:
+            if result["error"] == "Permission denied":
+                raise HTTPException(status_code=403, detail=result["error"])
+            elif result["error"] == "Task not found":
+                raise HTTPException(status_code=404, detail=result["error"])
+            elif "No active timer" in result["error"]:
+                raise HTTPException(status_code=400, detail=result["error"])
+            else:
+                raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "message": "Timer paused successfully",
+            "task_id": task_id,
+            "session": result.get("session"),
+            "duration_before_pause": result.get("duration_before_pause"),
+            "status": "paused",
+            "paused_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error pausing timer: {str(e)}")
+
+
+@app.post("/tasks/{task_id}/timer/resume")
+async def resume_task_timer_endpoint(
+    task_id: str,
+    timer_data: dict,
+    current_user: Dict = Depends(get_current_user)
+):
+    """Resume a paused timer for a task"""
+    try:
+        user_id = current_user.get("id")
+        note = timer_data.get("note", "")
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User ID not found")
+        
+        result = await resume_task_timer(task_id, user_id, note)
+        
+        if "error" in result:
+            if result["error"] == "Permission denied":
+                raise HTTPException(status_code=403, detail=result["error"])
+            elif result["error"] == "Task not found":
+                raise HTTPException(status_code=404, detail=result["error"])
+            elif "No paused timer" in result["error"]:
+                raise HTTPException(status_code=400, detail=result["error"])
+            else:
+                raise HTTPException(status_code=400, detail=result["error"])
+        
+        return {
+            "message": "Timer resumed successfully",
+            "task_id": task_id,
+            "session": result.get("session"),
+            "status": "active",
+            "resumed_by": current_user.get("username")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error resuming timer: {str(e)}")
+
 
 # Debug endpoints (only in development and with admin access)
 if settings.debug:

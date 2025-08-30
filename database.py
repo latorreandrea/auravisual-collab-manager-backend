@@ -801,7 +801,7 @@ async def stop_task_timer(task_id: str, user_id: str) -> Dict:
         if task_check.data["assigned_to"] != user_id and user_role != "admin":
             return {"error": "Permission denied"}
         
-        # Find active session
+        # Find active or paused session
         time_logs = task_check.data.get("time_logs") or []
         active_session_index = next(
             (i for i, log in enumerate(time_logs) if not log.get("end_time")), 
@@ -809,23 +809,38 @@ async def stop_task_timer(task_id: str, user_id: str) -> Dict:
         )
         
         if active_session_index is None:
-            return {"error": "No active timer found"}
+            return {"error": "No active or paused timer found"}
         
         # Complete the session
         from datetime import datetime
         end_time = datetime.utcnow().isoformat()
-        start_time = time_logs[active_session_index]["start_time"]
+        session = time_logs[active_session_index]
         
-        # Calculate duration
-        from datetime import datetime
+        # Calculate total duration (including pause time if any)
+        start_time = session["start_time"]
         start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
         end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-        duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
+        
+        # If session was paused, calculate duration excluding pause time
+        if session.get("paused_at") and session.get("resumed_at"):
+            # Session was paused and resumed
+            pause_dt = datetime.fromisoformat(session["paused_at"].replace('Z', '+00:00'))
+            resume_dt = datetime.fromisoformat(session["resumed_at"].replace('Z', '+00:00'))
+            pause_duration = (resume_dt - pause_dt).total_seconds() / 60
+            total_duration = int((end_dt - start_dt).total_seconds() / 60 - pause_duration)
+        elif session.get("paused_at"):
+            # Currently paused, calculate duration up to pause
+            pause_dt = datetime.fromisoformat(session["paused_at"].replace('Z', '+00:00'))
+            total_duration = int((pause_dt - start_dt).total_seconds() / 60)
+        else:
+            # No pause, normal calculation
+            total_duration = int((end_dt - start_dt).total_seconds() / 60)
         
         # Update session
         time_logs[active_session_index].update({
             "end_time": end_time,
-            "duration_minutes": duration_minutes,
+            "duration_minutes": total_duration,
+            "completion_note": note or "",
             "completed_by": user_id
         })
         
@@ -908,6 +923,136 @@ async def get_task_time_logs(task_id: str, user_id: str) -> Dict:
         
     except Exception as e:
         logger.error(f"Error getting task time logs: {str(e)}")
+        return {"error": str(e)}
+
+
+async def pause_task_timer(task_id: str, user_id: str, note: str = None) -> Dict:
+    """Pause a timer for a task (can be resumed later)"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Verify task exists and user has permission
+        task_check = admin_client.from_("tasks").select("assigned_to, time_logs").eq("id", task_id).single().execute()
+        
+        if not task_check.data:
+            return {"error": "Task not found"}
+        
+        # Check permission
+        user_role_check = admin_client.from_("users").select("role").eq("id", user_id).single().execute()
+        user_role = user_role_check.data.get("role") if user_role_check.data else None
+        
+        if task_check.data["assigned_to"] != user_id and user_role != "admin":
+            return {"error": "Permission denied"}
+        
+        # Find active session
+        time_logs = task_check.data.get("time_logs") or []
+        active_session_index = next(
+            (i for i, log in enumerate(time_logs) if not log.get("end_time") and not log.get("paused_at")), 
+            None
+        )
+        
+        if active_session_index is None:
+            return {"error": "No active timer found"}
+        
+        # Pause the session
+        from datetime import datetime
+        pause_time = datetime.utcnow().isoformat()
+        
+        # Calculate duration up to pause
+        start_time = time_logs[active_session_index]["start_time"]
+        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        pause_dt = datetime.fromisoformat(pause_time.replace('Z', '+00:00'))
+        duration_minutes = int((pause_dt - start_dt).total_seconds() / 60)
+        
+        # Update session with pause info
+        time_logs[active_session_index].update({
+            "paused_at": pause_time,
+            "duration_before_pause": duration_minutes,
+            "pause_note": note or "",
+            "paused_by": user_id
+        })
+        
+        # Update task
+        response = admin_client.from_("tasks").update({
+            "time_logs": time_logs
+        }).eq("id", task_id).execute()
+        
+        if response.data:
+            logger.info(f"Timer paused for task {task_id} by user {user_id}. Duration before pause: {duration_minutes} minutes")
+            return {
+                "session": time_logs[active_session_index],
+                "task_id": task_id,
+                "duration_before_pause": duration_minutes,
+                "status": "paused"
+            }
+        else:
+            return {"error": "Failed to pause timer"}
+            
+    except Exception as e:
+        logger.error(f"Error pausing task timer: {str(e)}")
+        return {"error": str(e)}
+
+
+async def resume_task_timer(task_id: str, user_id: str, note: str = None) -> Dict:
+    """Resume a paused timer for a task"""
+    try:
+        admin_client = get_supabase_admin_client()
+        
+        # Verify task exists and user has permission
+        task_check = admin_client.from_("tasks").select("assigned_to, time_logs").eq("id", task_id).single().execute()
+        
+        if not task_check.data:
+            return {"error": "Task not found"}
+        
+        # Check permission
+        user_role_check = admin_client.from_("users").select("role").eq("id", user_id).single().execute()
+        user_role = user_role_check.data.get("role") if user_role_check.data else None
+        
+        if task_check.data["assigned_to"] != user_id and user_role != "admin":
+            return {"error": "Permission denied"}
+        
+        # Find paused session
+        time_logs = task_check.data.get("time_logs") or []
+        paused_session_index = next(
+            (i for i, log in enumerate(time_logs) if log.get("paused_at") and not log.get("end_time")), 
+            None
+        )
+        
+        if paused_session_index is None:
+            return {"error": "No paused timer found"}
+        
+        # Resume the session
+        from datetime import datetime
+        resume_time = datetime.utcnow().isoformat()
+        
+        # Update session with resume info
+        time_logs[paused_session_index].update({
+            "resumed_at": resume_time,
+            "resume_note": note or "",
+            "resumed_by": user_id
+        })
+        
+        # Remove paused_at to make it active again
+        if "paused_at" in time_logs[paused_session_index]:
+            del time_logs[paused_session_index]["paused_at"]
+        
+        # Update task
+        response = admin_client.from_("tasks").update({
+            "time_logs": time_logs
+        }).eq("id", task_id).execute()
+        
+        if response.data:
+            logger.info(f"Timer resumed for task {task_id} by user {user_id}")
+            return {
+                "session": time_logs[paused_session_index],
+                "task_id": task_id,
+                "status": "active"
+            }
+        else:
+            return {"error": "Failed to resume timer"}
+            
+    except Exception as e:
+        logger.error(f"Error resuming task timer: {str(e)}")
         return {"error": str(e)}
 
 

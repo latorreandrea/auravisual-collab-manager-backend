@@ -264,7 +264,29 @@ GET /client/tickets/{ticket_id}
 
 ## ⏱️ Time Tracking System
 
-The Auravisual time tracking system enables accurate monitoring of time worked on each task, providing billing, reporting, and workload management capabilities.
+The Auravisual time tracking system enables accurate monitoring of time worked on each task, providing billing, reporting, and workload management capabilities. The system includes advanced pause/resume functionality to ensure accurate billing by excluding break time.
+
+### 📋 Complete Work Session Example
+
+```bash
+# 1. Start work at 9:00 AM
+POST /tasks/task-123/timer/start
+→ Timer starts, task status changes to "in_progress"
+
+# 2. Pause for lunch at 12:00 PM (3 hours worked)
+POST /tasks/task-123/timer/pause
+{"note": "Lunch break"}
+→ Timer paused, 180 minutes recorded before pause
+
+# 3. Resume at 1:00 PM 
+POST /tasks/task-123/timer/resume
+{"note": "Back from lunch"}
+→ Timer resumed, 1-hour pause excluded from billing
+
+# 4. Stop at 5:00 PM (7 total hours, 6 billable hours)
+POST /tasks/task-123/timer/stop
+→ Final session: 360 minutes billable (pause time excluded)
+```
 
 ### 🔧 Architecture
 
@@ -289,7 +311,39 @@ Authorization: Bearer <staff_token>
 - Creates new session with start timestamp
 - Updates task status to "in progress" if necessary
 
-#### 2. **Stop Timer**
+#### 2. **Pause Timer** (Optional)
+```bash
+# Staff pauses work (e.g., lunch break)
+POST /tasks/{task_id}/timer/pause
+Authorization: Bearer <staff_token>
+{
+  "note": "Lunch break"
+}
+```
+
+**Internal Process:**
+- Finds user's active session for that task
+- Records pause timestamp and optional note
+- Maintains session but tracks pause duration
+- Session status changes to "paused"
+
+#### 3. **Resume Timer** (After Pause)
+```bash
+# Staff resumes work after pause
+POST /tasks/{task_id}/timer/resume
+Authorization: Bearer <staff_token>
+{
+  "note": "Back from lunch"
+}
+```
+
+**Internal Process:**
+- Finds user's paused session for that task
+- Records resume timestamp and optional note
+- Session continues with pause time excluded from billing
+- Session status changes back to "active"
+
+#### 4. **Stop Timer**
 ```bash
 # Staff completes work session
 POST /tasks/{task_id}/timer/stop
@@ -298,11 +352,11 @@ Authorization: Bearer <staff_token>
 
 **Internal Process:**
 - Finds user's active session for that task
-- Calculates session duration in minutes
+- Calculates session duration in minutes (excluding pause time)
 - Updates totals: `total_time_minutes` and `time_sessions_count`
 - Closes session with end timestamp
 
-#### 3. **Time Monitoring**
+#### 5. **Time Monitoring**
 ```bash
 # Staff views their worked time
 GET /tasks/my/time-summary
@@ -1677,6 +1731,84 @@ curl -X POST https://app.auravisual.dk/tasks/TASK_UUID/timer/stop \
 
 ---
 
+### POST /tasks/{task_id}/timer/pause
+**Description:** Pause an active timer for a task (can be resumed later)  
+**Authentication:** Bearer token (admin or internal_staff)  
+**Permission:** User must have an active timer for this task
+
+**Request:**
+```bash
+curl -X POST https://app.auravisual.dk/tasks/TASK_UUID/timer/pause \
+  -H "Authorization: Bearer $STAFF_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"note": "Lunch break"}'
+```
+
+**Response:**
+```json
+{
+  "message": "Timer paused successfully",
+  "task_id": "uuid-task-1",
+  "session": {
+    "session_id": "uuid-session-1",
+    "start_time": "2024-01-15T09:00:00Z",
+    "paused_at": "2024-01-15T12:00:00Z",
+    "duration_before_pause": 180,
+    "pause_note": "Lunch break",
+    "paused_by": "uuid-staff-1"
+  },
+  "duration_before_pause": 180,
+  "status": "paused",
+  "paused_by": "john_developer"
+}
+```
+
+**Error Cases:**
+- `404` - No active timer found for this user and task
+- `403` - Insufficient permissions
+- `400` - Timer already paused
+
+---
+
+### POST /tasks/{task_id}/timer/resume
+**Description:** Resume a paused timer for a task  
+**Authentication:** Bearer token (admin or internal_staff)  
+**Permission:** User must have a paused timer for this task
+
+**Request:**
+```bash
+curl -X POST https://app.auravisual.dk/tasks/TASK_UUID/timer/resume \
+  -H "Authorization: Bearer $STAFF_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"note": "Back from lunch"}'
+```
+
+**Response:**
+```json
+{
+  "message": "Timer resumed successfully",
+  "task_id": "uuid-task-1",
+  "session": {
+    "session_id": "uuid-session-1",
+    "start_time": "2024-01-15T09:00:00Z",
+    "paused_at": "2024-01-15T12:00:00Z",
+    "resumed_at": "2024-01-15T13:00:00Z",
+    "pause_note": "Lunch break",
+    "resume_note": "Back from lunch",
+    "resumed_by": "uuid-staff-1"
+  },
+  "status": "active",
+  "resumed_by": "john_developer"
+}
+```
+
+**Error Cases:**
+- `404` - No paused timer found for this user and task
+- `403` - Insufficient permissions
+- `400` - Timer not paused or already active
+
+---
+
 ### GET /tasks/{task_id}/time-logs
 **Description:** Get detailed time logs for a specific task  
 **Authentication:** Bearer token (admin or internal_staff)  
@@ -1799,11 +1931,14 @@ curl -H "Authorization: Bearer $STAFF_TOKEN" \
 
 #### ⏱️ Time Tracking Features:
 - `POST /tasks/{id}/timer/start` - Start timer for task (admin/staff)
+- `POST /tasks/{id}/timer/pause` - Pause active timer (excludes pause time from billing)
+- `POST /tasks/{id}/timer/resume` - Resume paused timer with note support
 - `POST /tasks/{id}/timer/stop` - Stop timer and calculate duration
 - `GET /tasks/{id}/time-logs` - Detailed session logs and analytics
 - `GET /tasks/my/time-summary` - Personal time tracking dashboard
 - Automatic `total_time_minutes` and `time_sessions_count` calculation
 - Client visibility of time investment through existing ticket endpoints
+- **Advanced Pause System**: Excludes pause time from billable hours for accurate billing
 
 #### 🔧 Technical Improvements:
 - Enhanced database schema with `time_logs` JSONB column
